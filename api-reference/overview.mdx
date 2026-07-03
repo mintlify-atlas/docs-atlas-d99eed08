@@ -1,7 +1,7 @@
 ---
-title: "Buda Lightning Invoice API Reference"
+title: "Buda Lightning Invoice REST API — Reference Overview"
 sidebarTitle: "Overview"
-description: "REST API reference for Buda Lightning Invoice. Base URL, authentication model, content type, and an index of all available endpoints."
+description: "REST API reference for Buda Lightning Invoice. Covers the base URL, authentication model, content type, and a full index of all available endpoints."
 ---
 
 The Buda Lightning Invoice API is a REST service that communicates exclusively over HTTPS and exchanges data as JSON. It wraps the Buda.com exchange API to let clients create Bitcoin Lightning Network invoices and verify payment status — without ever handling Buda.com credentials directly. All four endpoints are publicly accessible; no API key or token is required from consumers.
@@ -38,28 +38,28 @@ GET endpoints (`/.well-known/lnurlp/:username` and `/callback`) receive their pa
   <Card
     title="Create Lightning Invoice"
     icon="bolt"
-    href="/api-reference/create-invoice"
+    href="api-reference/create-invoice"
   >
     `POST /newinvoice` — Generate a new BOLT11 Lightning invoice for a given amount in satoshis.
   </Card>
   <Card
     title="Check Invoice Status"
     icon="circle-check"
-    href="/api-reference/check-status"
+    href="api-reference/check-status"
   >
     `POST /status` — Verify whether a Lightning invoice has been paid and confirmed on Buda.com.
   </Card>
   <Card
     title="LNURL-pay Metadata"
     icon="at"
-    href="/api-reference/lnurlp-metadata"
+    href="api-reference/lnurlp-metadata"
   >
     `GET /.well-known/lnurlp/:username` — Return the LNURL-pay metadata document for a Lightning Address.
   </Card>
   <Card
     title="LNURL-pay Callback"
     icon="arrow-right"
-    href="/api-reference/callback"
+    href="api-reference/callback"
   >
     `GET /callback` — LNURL-pay callback that converts a millisatoshi amount into a BOLT11 invoice.
   </Card>

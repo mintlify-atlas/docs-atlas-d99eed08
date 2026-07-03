@@ -1,12 +1,12 @@
 ---
-title: "POST /status — Check Lightning Invoice Payment"
-sidebarTitle: "POST /status"
+title: "POST /status — Check Lightning Invoice Payment Status"
+sidebarTitle: "Check Status"
 description: "POST /status checks whether a Lightning invoice has been paid and confirmed. Returns a boolean status by querying Buda.com's deposit history."
 ---
 
 This endpoint verifies whether a Lightning invoice has been paid by querying Buda.com's BTC deposit history. It searches all confirmed deposits for one whose `deposit_data.invoice.encoded_payment_request` matches the invoice string you provide. Because the check happens server-side against the authenticated Buda.com account, no API credentials are needed from you — only the BOLT11 payment request returned by `POST /newinvoice`.
 
-```
+```http
 POST /status
 ```
 
@@ -61,7 +61,12 @@ All errors return HTTP **400 Bad Request**.
 {
   "ok": false,
   "errors": {
-    "invoice": { "msg": "Ingrese invoice" }
+    "invoice": {
+      "value": "",
+      "msg": "Ingrese invoice",
+      "param": "invoice",
+      "location": "body"
+    }
   }
 }
 ```

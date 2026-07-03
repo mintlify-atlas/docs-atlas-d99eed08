@@ -92,8 +92,8 @@ Called by `helpers/getPaymentConfirmation.js` whenever `POST /status` is invoked
 The response contains a `deposits` array. The service scans every element looking for one where both conditions are true:
 
 ```javascript
-deposit.deposit_data.invoice.encoded_payment_request === invoice
-  && deposit.state === 'confirmed'
+e.deposit_data.invoice.encoded_payment_request === invoice
+  && e.state === 'confirmed'
 ```
 
 If a matching confirmed deposit is found, `status: true` is returned. Otherwise `status: false`.
@@ -104,13 +104,13 @@ Buda API errors are caught inside `Buda.prototype._request` and re-thrown as a J
 
 ```javascript
 // HTTP error (e.g. 401, 422):
-throw new Error('Buda error ' + statusCode + ': ' + JSON.stringify(responseBody));
+message = 'Buda error ' + err.statusCode + ': ' + JSON.stringify(err.response.body);
 
-// 404 specifically:
-throw new Error('Buda error 404: Not found');
+// HTTP 404 specifically:
+message = 'Buda error 404: Not found';
 
 // Network / timeout error:
-throw new Error('Buda error: ' + err.message);
+message = 'Buda error: ' + err.message;
 ```
 
 These error messages bubble up through the helpers to the controllers, which catch them and return a `400` response:
@@ -137,11 +137,11 @@ Your integration code should check for `ok: false` in any `400` response and sur
 | `fees(currency, type)` | No | Deposit/withdrawal fee schedules |
 | `get_quotation(market, type, amount, limit)` | Yes | Get a price quotation |
 | `balance(currency)` | Yes | Account balance for a currency |
-| `order_pages(market, per, page, state, min_exchanged)` | Yes | Paginated order history |
+| `order_pages(market, per, page, state, minimun_exchanged)` | Yes | Paginated order history |
 | `new_order(market, type, price_type, limit, amount)` | Yes | Place a new buy/sell order |
 | `cancel_order(order_id)` | Yes | Cancel an open order |
 | `single_order(order_id)` | Yes | Fetch a single order's status |
-| `deposits(currency, per, page, state)` | Yes | List deposits for a currency |
+| `deposits(currency, per, page, state)` | Yes | List deposits for a currency ✦ |
 | `withdrawals(currency, per, page, state)` | Yes | List withdrawals for a currency |
 | `withdrawal(currency, amount, target_address, simulate)` | Yes | Initiate a crypto withdrawal |
 | `lightning_withdrawal(amount, invoice, simulate)` | Yes | Send a Lightning payment |
@@ -150,4 +150,4 @@ Your integration code should check for `ok: false` in any `400` response and sur
 | `new_crypto_address(currency)` | Yes | Generate a new deposit address |
 | `get_address(currency, address_id)` | Yes | Fetch an existing deposit address |
 
-✦ This is the method actively used by the service today.
+✦ These are the two methods actively used by the service today.

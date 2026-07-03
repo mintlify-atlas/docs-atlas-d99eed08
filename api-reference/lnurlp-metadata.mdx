@@ -1,7 +1,7 @@
 ---
 title: "GET /.well-known/lnurlp/:username — LNURL-pay Metadata"
-sidebarTitle: "GET /lnurlp/:username"
-description: "GET /.well-known/lnurlp/:username returns LNURL-pay metadata for Lightning Address support. Used by wallets to discover payment parameters before requesting an invoice."
+sidebarTitle: "LNURL-pay Metadata"
+description: "Returns LNURL-pay metadata for Lightning Address support. Wallets fetch this endpoint to discover payment parameters and the invoice callback URL."
 ---
 
 This endpoint implements the LNURL-pay well-known discovery step — the first step in the Lightning Address payment flow. When a wallet wants to pay `username@domain.com`, it fetches this URL to discover payment parameters and the callback URL it should use to request an invoice. All usernames resolve to the same underlying Buda.com account, so the username portion of the address is cosmetic and only affects the metadata description returned.

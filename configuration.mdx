@@ -1,5 +1,5 @@
 ---
-title: "Configure Buda Lightning Invoice"
+title: "Buda Lightning Invoice: Environment and Configuration"
 sidebarTitle: "Configuration"
 description: "Environment variables, optional settings, and server configuration for Buda Lightning Invoice. Set up credentials, port, and domain."
 ---
@@ -58,3 +58,4 @@ The following scripts are defined in `package.json`:
 | `npm start` | Starts the server with `node index.js`. No hot reload — suitable for production or Docker environments. |
 | `npm test` | Runs the full Jest test suite, covering helpers, controllers, validation middleware, and route integration tests via Supertest. |
 | `npm run test:coverage` | Runs Jest with coverage collection enabled and prints a summary against the configured minimum thresholds (branches: 60%, functions/lines/statements: 70%). |
+| `npm run test:watch` | Starts Jest in watch mode, re-running only tests related to changed files. Useful during active development. |

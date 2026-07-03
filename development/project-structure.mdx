@@ -34,9 +34,10 @@ The following steps trace the journey of a `POST /newinvoice` request from the n
 
 <Steps>
   <Step title="index.js — Bootstrap">
-    Express receives the incoming request. `cors()` middleware runs first, adding the appropriate CORS headers so browser-based clients are allowed. `express.json()` parses the JSON request body. The request is then handed off to the router registered at `'/'`.
+    Express receives the incoming request. `app.set('trust proxy', true)` is configured first so the app correctly reads the originating IP when running behind a reverse proxy. `cors()` middleware then adds the appropriate CORS headers so browser-based clients are allowed. `express.json()` parses the JSON request body. The request is then handed off to the router registered at `'/'`.
 
     ```javascript
+    app.set('trust proxy', true);
     app.use(cors());
     app.use(express.json());
     app.use('/', require('./routes/buda'));
@@ -100,7 +101,7 @@ The following steps trace the journey of a `POST /newinvoice` request from the n
   </Step>
 
   <Step title="buda-promise/buda.js — Signed HTTP request">
-    The Buda API client signs the outbound request using HMAC-SHA384, attaches the `X-SBTC-APIKEY`, `X-SBTC-NONCE`, and `X-SBTC-SIGNATURE` headers, and dispatches the authenticated HTTP call to Buda.com. The resulting data travels back up the promise chain as the BOLT11 invoice string.
+    The Buda API client signs the outbound request using HMAC-SHA384, attaches the `X-SBTC-APIKEY`, `X-SBTC-NONCE`, and `X-SBTC-SIGNATURE` headers, and dispatches the authenticated HTTP call to Buda.com. The signature is computed over the concatenation of `method`, `path`, the base64-encoded request body, and the nonce. The resulting data travels back up the promise chain as the BOLT11 invoice string.
   </Step>
 </Steps>
 

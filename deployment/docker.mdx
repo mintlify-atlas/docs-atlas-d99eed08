@@ -1,5 +1,5 @@
 ---
-title: "Run Buda Lightning Invoice with Docker"
+title: "Build and Run Buda Lightning Invoice with Docker Locally"
 sidebarTitle: "Docker"
 description: "Build and run Buda Lightning Invoice as a Docker container using the included multi-stage Dockerfile for local or self-hosted deployment."
 ---
@@ -216,7 +216,7 @@ DOMAIN=your-domain.com
 ```
 
 <Note>
-  The `.dockerignore` file excludes `node_modules`, `.env`, `Dockerfile`, `fly.toml`, `.git`, and test coverage directories from the build context. This means your local `.env` file is **never copied into the image**, even if you forget to add a `COPY` exclusion. Secrets must always be injected at `docker run` time.
+  The `.dockerignore` file excludes `node_modules`, `.env`, `.dockerignore`, `Dockerfile`, `fly.toml`, and `.git` from the build context. This means your local `.env` file is **never copied into the image**, even if you forget to add a `COPY` exclusion. Secrets must always be injected at `docker run` time.
 </Note>
 
 ## Port mapping

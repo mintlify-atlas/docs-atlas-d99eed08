@@ -1,7 +1,7 @@
 ---
-title: "GET /callback — LNURL-pay Invoice Callback"
-sidebarTitle: "GET /callback"
-description: "GET /callback is the LNURL-pay callback endpoint. Accepts an amount in millisatoshis, creates a Lightning invoice, and returns a BOLT11 payment request for wallets."
+title: "GET /callback — LNURL-pay Invoice Callback Endpoint"
+sidebarTitle: "Invoice Callback"
+description: "Second step in the LNURL-pay flow. Pass a millisatoshi amount to create a Buda.com Lightning invoice and receive a BOLT11 payment request string."
 ---
 
 This is the second step of the LNURL-pay flow. After a Lightning wallet fetches `/.well-known/lnurlp/:username` and reads the payment parameters, it calls this callback endpoint with the amount the user wishes to pay, expressed in millisatoshis. The server converts that amount to satoshis, creates a Lightning invoice via the Buda.com API, and returns a BOLT11 payment request for the wallet to pay.

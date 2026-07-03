@@ -22,7 +22,7 @@ The Buda API client (`buda-promise/buda.js`) uses these credentials to sign ever
 |---|---|
 | `X-SBTC-APIKEY` | Identifies the account. |
 | `X-SBTC-NONCE` | A monotonically increasing timestamp (milliseconds). Prevents replay attacks — Buda rejects requests whose nonce is not greater than the last accepted nonce. |
-| `X-SBTC-SIGNATURE` | The HMAC-SHA384 signature of the nonce + method + path + MD5 body hash, keyed by `BUDA_API_SECRET`. |
+| `X-SBTC-SIGNATURE` | The HMAC-SHA384 signature of `method + path + base64(body) + nonce`, keyed by `BUDA_API_SECRET`. |
 
 Because the signature is computed server-side and the secret never leaves the server, intercepting a request in transit does not expose the credentials and the nonce prevents replaying a captured signed request.
 

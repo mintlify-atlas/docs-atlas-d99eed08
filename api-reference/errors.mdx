@@ -1,14 +1,14 @@
 ---
-title: "API Error Responses and Validation"
+title: "API Errors: HTTP Status Codes and Validation Rules"
 sidebarTitle: "Errors"
-description: "Error response formats, HTTP status codes, validation error shapes, and common error messages from the Buda Lightning Invoice API."
+description: "Error response formats, HTTP status codes, validation error shapes, and exact error messages returned by the Buda Lightning Invoice API endpoints."
 ---
 
 The Buda Lightning Invoice API returns two distinct error shapes. **Validation errors** are produced by the `express-validator` middleware when a request field is missing or does not meet its rules — they arrive before any business logic runs. **Application errors** are produced when the controller or an internal Buda.com API call fails — they carry a plain error string instead of a field map. Both shapes use HTTP `400 Bad Request` and always include `"ok": false`.
 
 ## Validation Errors (400)
 
-Validation errors are returned when one or more request fields fail their `express-validator` checks. The response contains an `errors` object whose keys are the failing field names.
+Validation errors are returned when one or more request fields fail their `express-validator` checks. The response contains an `errors` object whose keys are the failing field names, produced by `express-validator`'s `errors.mapped()` method. Each field entry includes at minimum a `msg` property with the human-readable error message.
 
 ```json
 {

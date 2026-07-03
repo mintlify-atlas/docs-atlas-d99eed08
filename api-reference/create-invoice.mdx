@@ -1,12 +1,12 @@
 ---
-title: "POST /newinvoice — Create a Lightning Invoice"
-sidebarTitle: "POST /newinvoice"
+title: "POST /newinvoice — Create a Bitcoin Lightning Invoice"
+sidebarTitle: "Create Invoice"
 description: "POST /newinvoice creates a BOLT11 Lightning invoice via Buda.com. Requires amount in satoshis and a description. Returns the encoded payment request."
 ---
 
 This endpoint creates a new Bitcoin Lightning Network BOLT11 invoice by forwarding your request to Buda.com's `POST /api/v2/lightning_network_invoices`. The server authenticates with Buda.com using server-side HMAC-SHA384 credentials — no API keys are required from you. On success it returns the encoded payment request string, which can be displayed as a QR code or pasted directly into any Lightning-compatible wallet.
 
-```
+```http
 POST /newinvoice
 ```
 
@@ -57,8 +57,18 @@ All errors return HTTP **400 Bad Request**.
 {
   "ok": false,
   "errors": {
-    "amount": { "msg": "Ingrese un número entero mayor a 1" },
-    "msg": { "msg": "Debe ingresar un mensaje" }
+    "amount": {
+      "value": "abc",
+      "msg": "Ingrese un número entero mayor a 1",
+      "param": "amount",
+      "location": "body"
+    },
+    "msg": {
+      "value": "",
+      "msg": "Debe ingresar un mensaje",
+      "param": "msg",
+      "location": "body"
+    }
   }
 }
 ```
@@ -174,7 +184,12 @@ print("Payment request:", invoice)
 {
   "ok": false,
   "errors": {
-    "amount": { "msg": "Ingrese un número entero mayor a 1" }
+    "amount": {
+      "value": 0,
+      "msg": "Ingrese un número entero mayor a 1",
+      "param": "amount",
+      "location": "body"
+    }
   }
 }
 ```
