@@ -1,0 +1,79 @@
+---
+title: "GET /.well-known/lnurlp/:username — LNURL-pay Metadata"
+sidebarTitle: "GET /lnurlp/:username"
+description: "GET /.well-known/lnurlp/:username returns LNURL-pay metadata for Lightning Address support. Used by wallets to discover payment parameters before requesting an invoice."
+---
+
+This endpoint implements the LNURL-pay well-known discovery step — the first step in the Lightning Address payment flow. When a wallet wants to pay `username@domain.com`, it fetches this URL to discover payment parameters and the callback URL it should use to request an invoice. All usernames resolve to the same underlying Buda.com account, so the username portion of the address is cosmetic and only affects the metadata description returned.
+
+```
+GET /.well-known/lnurlp/:username
+```
+
+## Path parameters
+
+<ParamField path="username" type="string" required>
+  Any username string. All usernames resolve to the same Buda.com account regardless of what value is supplied here. This value is interpolated into the `metadata` description field as `"Pago Lightning a {username}"`.
+</ParamField>
+
+## Response (200 OK)
+
+<ResponseField name="callback" type="string">
+  The URL wallets must call to request a Lightning invoice. Constructed dynamically from the `DOMAIN` environment variable (or the request's `Host` header if `DOMAIN` is not set): `{protocol}://{domain}/callback`.
+</ResponseField>
+
+<ResponseField name="maxSendable" type="integer">
+  Maximum payable amount in **millisatoshis**: `100000000` (equivalent to 100,000 satoshis). Wallets will not offer amounts above this value.
+</ResponseField>
+
+<ResponseField name="minSendable" type="integer">
+  Minimum payable amount in **millisatoshis**: `1000` (equivalent to 1 satoshi). Wallets will not offer amounts below this value.
+</ResponseField>
+
+<ResponseField name="metadata" type="string">
+  A JSON-encoded array of metadata tuples as required by the LNURL-pay spec. Returns `[["text/plain", "Pago Lightning a {username}"]]` with the path `:username` interpolated.
+</ResponseField>
+
+<ResponseField name="tag" type="string">
+  Always `"payRequest"`. Identifies this response as an LNURL-pay endpoint per the LUD-06 specification.
+</ResponseField>
+
+<ResponseField name="commentAllowed" type="integer">
+  Maximum number of characters allowed in the `comment` field when calling `/callback`. Set to `140` characters per [LUD-09](https://github.com/lnurl/luds/blob/luds/09.md).
+</ResponseField>
+
+<Note>
+  Amounts in this response — `minSendable` and `maxSendable` — are in **millisatoshis**, not satoshis. 1 satoshi = 1000 millisatoshis. When calling the `/callback` endpoint, pass the amount in millisatoshis as well.
+</Note>
+
+<Note>
+  The `DOMAIN` environment variable controls the hostname used to build the `callback` URL. If `DOMAIN` is not configured on the server, the callback is constructed from the incoming request's `Host` header instead.
+</Note>
+
+## Example
+
+**Request**
+
+```
+GET https://budaln.fly.dev/.well-known/lnurlp/nicolas
+```
+
+**Response**
+
+```json
+{
+  "callback": "https://budaln.fly.dev/callback",
+  "maxSendable": 100000000,
+  "minSendable": 1000,
+  "metadata": "[[\"text/plain\",\"Pago Lightning a nicolas\"]]",
+  "tag": "payRequest",
+  "commentAllowed": 140
+}
+```
+
+## Spec compliance
+
+This endpoint conforms to two LNURL specifications:
+
+- **[LNURL spec LUD-06](https://github.com/lnurl/luds/blob/luds/06.md)** — Defines the `payRequest` tag and the base LNURL-pay flow: the wallet fetches this well-known URL, reads `minSendable` / `maxSendable` / `callback`, then calls the callback with a chosen amount to get a BOLT11 invoice.
+- **[LUD-09](https://github.com/lnurl/luds/blob/luds/09.md)** — Extends LNURL-pay with an optional `comment` field. The `commentAllowed: 140` field in the response signals that the `/callback` endpoint accepts a `comment` query parameter of up to 140 characters.

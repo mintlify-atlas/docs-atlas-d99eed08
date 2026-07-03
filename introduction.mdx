@@ -1,0 +1,82 @@
+---
+title: "Buda Lightning Invoice: Bitcoin payments for your app"
+sidebarTitle: "Introduction"
+description: "Learn what Buda Lightning Invoice is, how it works, and when to use it to integrate Lightning Network payments via Buda.com."
+---
+
+Buda Lightning Invoice is an Express.js service that acts as a server-side bridge between your application and the [Buda.com](https://www.buda.com) exchange API, enabling you to create and verify Bitcoin Lightning Network invoices over plain HTTP. It is designed for developers who want to accept Lightning payments backed by a real Buda.com exchange account — without exposing any exchange credentials to the outside world. Your frontend or downstream service calls simple REST endpoints; all authentication with Buda lives exclusively on the server.
+
+## What it does
+
+The service exposes four public endpoints that cover the full Lightning payment lifecycle:
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/newinvoice` | `POST` | Creates a new BOLT11 Lightning invoice on Buda.com for a given amount (in satoshis) and memo. |
+| `/status` | `POST` | Checks whether a specific invoice has been paid by looking for a `confirmed` deposit on Buda.com. |
+| `/.well-known/lnurlp/:username` | `GET` | Returns the LNURL-pay metadata document needed to support a Lightning Address (e.g. `user@your-domain.com`). |
+| `/callback` | `GET` | LNURL-pay callback invoked by a payer's wallet — accepts an amount in millisatoshis, converts it to satoshis, and returns a fresh invoice. |
+
+<Note>
+  The four endpoints above require **no authentication from API consumers**. Buda.com credentials (`BUDA_API_KEY` and `BUDA_API_SECRET`) are loaded from server-side environment variables and are never exposed to clients.
+</Note>
+
+## Architecture overview
+
+Every request travels through a consistent pipeline before reaching Buda.com and returning a response:
+
+```
+HTTP Request
+  → Express route (routes/buda.js)
+  → express-validator + fieldsValidation middleware
+  → Controller (controllers/buda.js)
+  → Helper (helpers/getInvoice.js | helpers/getPaymentConfirmation.js)
+  → buda-promise/buda.js (HMAC-SHA384 signing)
+  → Buda.com API
+  → HTTP Response
+```
+
+<Steps>
+  <Step title="Route layer">
+    `routes/buda.js` matches the incoming HTTP method and path, then runs `express-validator` rules to validate and sanitize request inputs before any business logic runs.
+  </Step>
+  <Step title="Validation middleware">
+    `middlewares/fields-validator.js` collects validation errors and short-circuits the request with a structured `400` response if any check fails, keeping controllers clean.
+  </Step>
+  <Step title="Controller">
+    `controllers/buda.js` orchestrates the response: it calls the appropriate helper, handles errors, and serializes the final JSON result.
+  </Step>
+  <Step title="Helper">
+    Focused helper modules (`getInvoice.js`, `getPaymentConfirmation.js`) contain the core business logic — invoice creation and deposit confirmation lookups.
+  </Step>
+  <Step title="Buda wrapper">
+    `buda-promise/buda.js` is a local Promise-based wrapper around the Buda.com REST API. It signs every private call with HMAC-SHA384 and attaches the `X-SBTC-APIKEY`, `X-SBTC-NONCE`, and `X-SBTC-SIGNATURE` headers automatically.
+  </Step>
+</Steps>
+
+## When to use this
+
+Buda Lightning Invoice is a good fit whenever you need Lightning payments tied to a Buda.com account:
+
+- **Micropayments** — accept sub-cent Bitcoin payments for digital goods or services.
+- **Donation systems** — embed a Lightning Address (e.g. `donations@your-domain.com`) on a website or profile.
+- **Paywalls** — gate access to content or APIs behind a pay-per-view Lightning invoice.
+- **Lightning Address backend** — serve the LNURL-pay and callback endpoints required by the Lightning Address specification.
+- **LLM / agent pay-per-call** — let AI agents pay for API access autonomously using Lightning, with each call generating a fresh invoice.
+
+## Prerequisites
+
+Before running Buda Lightning Invoice, make sure you have:
+
+- **Node.js 20** — the Dockerfile and README both target Node `20.18.0`; earlier versions are untested.
+- **npm** — used for dependency installation and running scripts.
+- **A Buda.com account** with an API key and secret that have deposit and Lightning Network permissions enabled.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="bolt" href="quickstart">
+    Install the project, configure your environment, and create your first Lightning invoice in under 5 minutes.
+  </Card>
+  <Card title="Configuration" icon="gear" href="configuration">
+    Explore every environment variable, npm script, and credential setup option in detail.
+  </Card>
+</CardGroup>

@@ -1,0 +1,164 @@
+---
+title: "Deploy Buda Lightning Invoice to Fly.io"
+sidebarTitle: "Fly.io"
+description: "Step-by-step guide to deploying Buda Lightning Invoice to Fly.io using the included fly.toml configuration and setting secrets securely."
+---
+
+The repository ships with a `fly.toml` pre-configured for the `budaln` app in the `gru` (São Paulo, Brazil) region, making Fly.io the recommended deployment target for Buda Lightning Invoice. With a single `fly deploy` command, Fly.io builds the Docker image, provisions a VM, applies your secrets, and makes the service available over HTTPS — no manual infrastructure setup required.
+
+## Prerequisites
+
+- A [Fly.io account](https://fly.io) (free tier is sufficient for low-traffic Lightning Address use)
+- The `flyctl` CLI installed on your local machine
+- Your Buda.com API credentials: `BUDA_API_KEY` and `BUDA_API_SECRET`
+- The repository cloned locally and `fly.toml` present in the project root
+
+## Deployment steps
+
+<Steps>
+  <Step title="Install flyctl and log in">
+    Install the Fly.io CLI with the official install script:
+
+    ```bash
+    curl -L https://fly.io/install.sh | sh
+    ```
+
+    Then authenticate with your Fly.io account:
+
+    ```bash
+    fly auth login
+    ```
+
+    This opens a browser window for OAuth login. Once complete, `flyctl` is ready to use.
+  </Step>
+
+  <Step title="Create the app (first-time only)">
+    From the repository root, run:
+
+    ```bash
+    fly launch
+    ```
+
+    Fly.io detects the existing `fly.toml` and Dockerfile automatically. Accept the defaults where prompted — the configuration is already tuned for this project. If asked whether to overwrite `fly.toml`, choose **No** to preserve the pre-configured settings.
+
+    <Note>
+      If the app name `budaln` is already taken on Fly.io, you will be prompted to choose a new name. Update the `app` field in `fly.toml` accordingly and adjust the `DOMAIN` secret in the next step.
+    </Note>
+  </Step>
+
+  <Step title="Set secrets">
+    Inject your credentials and domain as Fly.io secrets. These are encrypted at rest and injected as environment variables at runtime — they are never baked into the image:
+
+    ```bash
+    fly secrets set BUDA_API_KEY=your_buda_api_key
+    fly secrets set BUDA_API_SECRET=your_buda_api_secret
+    fly secrets set DOMAIN=budaln.fly.dev
+    ```
+
+    `DOMAIN` is used to build the Lightning Address callback URL in `/.well-known/lnurlp/:username`. Set it to the public hostname of your deployed app.
+  </Step>
+
+  <Step title="Deploy">
+    Build and deploy the application:
+
+    ```bash
+    fly deploy
+    ```
+
+    Fly.io builds the Docker image using the included multi-stage Dockerfile — running `npm ci` in the build stage and starting the server with `npm run start` in the final stage. Progress is streamed to your terminal, ending with a confirmation that the release is deployed.
+  </Step>
+
+  <Step title="Verify the deployment">
+    Check the VM status:
+
+    ```bash
+    fly status
+    ```
+
+    Tail live logs to confirm the server started successfully:
+
+    ```bash
+    fly logs
+    ```
+
+    You should see `Listening at port 8080` in the log output. The app is now accessible at:
+
+    ```text
+    https://budaln.fly.dev
+    ```
+
+    Test a quick invoice creation to validate the end-to-end flow:
+
+    ```bash
+    curl -X POST https://budaln.fly.dev/newinvoice \
+      -H 'Content-Type: application/json' \
+      -d '{"amount": 1000, "msg": "test"}'
+    ```
+  </Step>
+</Steps>
+
+## fly.toml configuration
+
+The `fly.toml` at the repository root was generated for the `budaln` app on 2025-08-30 and contains the following key settings:
+
+```toml
+app = 'budaln'
+primary_region = 'gru'
+
+[build]
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 1024
+```
+
+| Setting | Value | Explanation |
+|---|---|---|
+| `app` | `budaln` | The Fly.io app name and subdomain (`budaln.fly.dev`). |
+| `primary_region` | `gru` | Guarulhos (São Paulo), Brazil — closest to the Buda.com exchange servers. |
+| `internal_port` | `8080` | The port Fly.io's proxy forwards traffic to inside the container. Must match the `PORT` env var. |
+| `force_https` | `true` | All plain HTTP requests are redirected to HTTPS automatically. |
+| `auto_stop_machines` | `'stop'` | The VM is stopped when there is no inbound traffic, reducing idle costs. |
+| `auto_start_machines` | `true` | The VM is started automatically when a new request arrives. |
+| `min_machines_running` | `0` | No machines are kept running at all times — cost-efficient for low traffic. |
+| `memory` | `1gb` | 1 GB RAM allocated per VM. |
+| `cpu_kind` | `shared` | Shared-CPU VM (the most cost-effective Fly.io tier). |
+| `cpus` | `1` | One virtual CPU. |
+
+<Note>
+  The server listens on the port defined by the `PORT` environment variable. If `PORT` is not set, it defaults to `8080` — which matches the `internal_port = 8080` in `fly.toml`. Do not change `internal_port` without also updating the `PORT` secret.
+</Note>
+
+<Warning>
+  `min_machines_running = 0` means the VM is fully stopped when idle. The first request after a period of inactivity will incur a **cold start delay** of several seconds while the machine boots. For a production Lightning Address where wallets expect a prompt response, consider setting `min_machines_running = 1` to keep at least one machine always running.
+</Warning>
+
+## Custom domain
+
+To serve the Lightning Address from your own domain (e.g. `pay.example.com`) instead of `budaln.fly.dev`:
+
+1. Add the certificate on Fly.io:
+
+   ```bash
+   fly certs add pay.example.com
+   ```
+
+2. Follow the DNS instructions printed by the command to point your domain to Fly.io.
+
+3. Update the `DOMAIN` secret so the LNURL-pay callback URL reflects the new hostname:
+
+   ```bash
+   fly secrets set DOMAIN=pay.example.com
+   ```
+
+   This triggers a rolling restart and the new domain will be used for all future Lightning Address metadata responses at `/.well-known/lnurlp/:username`.

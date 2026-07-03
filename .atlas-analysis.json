@@ -1,23 +1,11 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
-  "name": "Buda Lightning Invoice",
+  "projectType": "api-service",
+  "projectName": "Buda Lightning Invoice",
+  "projectDescription": "An Express.js backend service that wraps the Buda.com exchange API to create and verify Bitcoin Lightning Network invoices and expose LNURL-pay / Lightning Address endpoints.",
   "theme": "luma",
-  "colors": {
-    "primary": "#F7931A",
-    "light": "#FFF4E5",
-    "dark": "#1A0F00"
-  },
-  "navbar": {
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/nicosaporiti/buda-lightning-invoice"
-    }
-  },
-  "footer": {
-    "socials": {
-      "github": "https://github.com/nicosaporiti/buda-lightning-invoice"
-    }
-  },
+  "primaryColor": "#F7931A",
+  "lightColor": "#FFF4E5",
+  "darkColor": "#1A0F00",
   "navigation": {
     "tabs": [
       {
@@ -83,5 +71,20 @@
         ]
       }
     ]
-  }
+  },
+  "keyFeatures": [
+    "Create Bitcoin Lightning Network BOLT11 invoices via Buda.com exchange",
+    "Verify invoice payment status by checking confirmed BTC deposits",
+    "LNURL-pay / Lightning Address protocol support (LUD-06, LUD-09)",
+    "Server-side HMAC-SHA384 authentication — API credentials never exposed to clients",
+    "Input validation via express-validator with structured error responses",
+    "One-command deployment to Fly.io with included Dockerfile and fly.toml",
+    "Full test suite with Jest and Supertest (unit + integration)"
+  ],
+  "publicApiSurface": [
+    "POST /newinvoice — create a Lightning invoice (amount in satoshis, msg)",
+    "POST /status — check if an invoice has been paid and confirmed",
+    "GET /.well-known/lnurlp/:username — LNURL-pay metadata for Lightning Address",
+    "GET /callback?amount=<msats>&comment=<text> — LNURL-pay callback returning a BOLT11 invoice"
+  ]
 }

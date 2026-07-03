@@ -1,0 +1,60 @@
+---
+title: "Configure Buda Lightning Invoice"
+sidebarTitle: "Configuration"
+description: "Environment variables, optional settings, and server configuration for Buda Lightning Invoice. Set up credentials, port, and domain."
+---
+
+All configuration for Buda Lightning Invoice is handled through a `.env` file placed at the project root. At startup, `index.js` calls `require('dotenv').config()`, which reads this file and populates `process.env` before Express initialises. This means no configuration is hard-coded — you can run the same codebase locally, in CI, and in production by swapping a single file or setting secrets in your deployment platform.
+
+<Warning>
+  Never expose `BUDA_API_KEY` or `BUDA_API_SECRET` in client-side code, public repositories, or logs. Add `.env` to your `.gitignore` immediately and rotate your credentials if they are ever accidentally committed.
+</Warning>
+
+## Environment variables
+
+<ParamField body="BUDA_API_KEY" type="string" required>
+  Your Buda.com API key. Used by `buda-promise/buda.js` to identify your account on every authenticated request. The value is sent in the `X-SBTC-APIKEY` header.
+</ParamField>
+
+<ParamField body="BUDA_API_SECRET" type="string" required>
+  Your Buda.com API secret. Used to generate the `X-SBTC-SIGNATURE` header via HMAC-SHA384 signing. Must correspond to the key above.
+</ParamField>
+
+<ParamField body="PORT" type="number" default="8080">
+  The TCP port the Express server listens on. Defaults to `8080`, which matches the internal port declared in `fly.toml` for Fly.io deployments. Set this to any available port for local development (e.g. `3001`).
+</ParamField>
+
+<ParamField body="DOMAIN" type="string" default="req.get('host')">
+  The public hostname used to build the `callback` URL returned by the `/.well-known/lnurlp/:username` endpoint. If this variable is not set, the server falls back to the `Host` header of the incoming request. Set it explicitly whenever you deploy behind a reverse proxy or CDN to ensure the callback URL is stable and publicly reachable.
+</ParamField>
+
+### Complete `.env` example
+
+```env
+PORT=3001
+BUDA_API_KEY=your_buda_api_key
+BUDA_API_SECRET=your_buda_api_secret
+DOMAIN=your-domain.com
+```
+
+## Getting Buda.com API credentials
+
+You must have a Buda.com account with API access enabled before running this service. To create an API key:
+
+- Log in to your account at [buda.com](https://www.buda.com).
+- Navigate to your account settings and open the **API** section.
+- Click **Create new API key** and give it a descriptive label (e.g. `lightning-invoice`).
+- Enable at least the **Deposits** and **Lightning Network** permissions — the service needs these to create invoices and look up confirmed deposits.
+- Copy the generated **key** and **secret** immediately. Buda.com will not show the secret again after you leave the page.
+- Paste the values into your `.env` file as `BUDA_API_KEY` and `BUDA_API_SECRET`.
+
+## npm scripts
+
+The following scripts are defined in `package.json`:
+
+| Command | Description |
+|---|---|
+| `npm run dev` | Starts the server with `nodemon index.js`, enabling automatic restarts on file changes. Recommended during local development. |
+| `npm start` | Starts the server with `node index.js`. No hot reload — suitable for production or Docker environments. |
+| `npm test` | Runs the full Jest test suite, covering helpers, controllers, validation middleware, and route integration tests via Supertest. |
+| `npm run test:coverage` | Runs Jest with coverage collection enabled and prints a summary against the configured minimum thresholds (branches: 60%, functions/lines/statements: 70%). |

@@ -1,0 +1,123 @@
+---
+title: "Bitcoin Lightning Network: Concepts for Developers"
+sidebarTitle: "Lightning Network"
+description: "Key Lightning Network concepts you need to integrate Buda Lightning Invoice: BOLT11 invoices, satoshis, payment channels, and confirmation flow."
+---
+
+The Lightning Network is Bitcoin's Layer 2 payment protocol — a network of bidirectional payment channels that enables fast, low-cost transactions without writing every payment to the Bitcoin blockchain. When you integrate Buda Lightning Invoice, your application creates and verifies Lightning payments through the Buda.com exchange. To build a reliable integration, you need to understand how Lightning invoices are structured, what units of currency the endpoints expect, how payment confirmation works, and why invoice expiry matters.
+
+## BOLT11 Invoices
+
+A BOLT11 payment request is the standard format for requesting a Lightning Network payment. The name comes from BOLT (Basis of Lightning Technology) specification number 11. To a user or wallet, it looks like a long encoded string — typically starting with `lnbc` on Bitcoin mainnet.
+
+A BOLT11 invoice encodes everything the payer's wallet needs to complete the payment:
+
+- **Amount** — how many satoshis to send
+- **Recipient node** — the public key of the payee's Lightning node
+- **Description / memo** — a human-readable label for the payment
+- **Payment hash** — the preimage hash used to settle the channel
+- **Expiry** — how long the invoice remains valid
+
+When you call `POST /newinvoice`, the service creates a BOLT11 invoice on your Buda.com account and returns the encoded payment request string in the `invoice` field:
+
+```json
+{
+  "invoice": "lnbc10u1p3q9h7zpp5xkzqlafes8y3akuqr4n...",
+  "amount": 1000,
+  "msg": "Payment for coffee"
+}
+```
+
+Your frontend or application should display this string as a QR code or copyable text so the payer's Lightning wallet can scan or paste it.
+
+<Note>
+  The `lnbc` prefix stands for **Lightning Network Bitcoin (mainnet)**. Testnet invoices use `lntb` and signet uses `lnbcrt`. All invoices produced by this service use `lnbc` because they are real mainnet invoices created against a live Buda.com account.
+</Note>
+
+## Satoshis and Millisatoshis
+
+Lightning Network payments operate at sub-satoshi precision. Understanding the two units — satoshis and millisatoshis — is essential because different endpoints in this service use different units.
+
+| Unit | Relationship | Used by |
+|------|-------------|---------|
+| **Satoshi (sat)** | 1 BTC = 100,000,000 sat | `POST /newinvoice` |
+| **Millisatoshi (msat)** | 1 sat = 1,000 msat | `GET /callback` |
+
+**`POST /newinvoice` — amount in satoshis**
+
+The `amount` field must be an integer number of satoshis, minimum `1`:
+
+```json
+{
+  "amount": 5000,
+  "msg": "Asado contribution"
+}
+```
+
+**`GET /callback` — amount in millisatoshis**
+
+The LNURL-pay callback receives the amount in millisatoshis (as required by the protocol), minimum `1000` msats (= 1 satoshi). The service divides by 1,000 internally before creating the invoice:
+
+```text
+GET /callback?amount=5000000&comment=Gracias
+```
+
+That `amount=5000000` is 5,000,000 millisatoshis = **5,000 satoshis**.
+
+## Payment Confirmation
+
+The Lightning Network settles payments instantly at the protocol level, but this service confirms payment by checking your Buda.com deposit history rather than monitoring a Lightning node directly. Here is the exact flow:
+
+<Steps>
+  <Step title="Client polls /status">
+    Your application sends the BOLT11 invoice string to `POST /status`:
+
+    ```json
+    { "invoice": "lnbc10u1p3q9h7z..." }
+    ```
+  </Step>
+  <Step title="Service fetches BTC deposits from Buda">
+    Internally, the service calls `GET /api/v2/currencies/btc/deposits` on the Buda.com API using your server-side credentials.
+  </Step>
+  <Step title="Match by encoded_payment_request">
+    The service searches the returned deposit list for an entry where `deposit_data.invoice.encoded_payment_request` equals the invoice string you submitted.
+  </Step>
+  <Step title="Check state === 'confirmed'">
+    If a matching deposit is found **and** its `state` is `"confirmed"`, the response returns `status: true`. Any other case — no match, or match with a pending state — returns `status: false`.
+  </Step>
+</Steps>
+
+A typical unconfirmed response looks like:
+
+```json
+{
+  "invoice": "lnbc10u1p3q9h7z...",
+  "status": false
+}
+```
+
+And a confirmed payment:
+
+```json
+{
+  "invoice": "lnbc10u1p3q9h7z...",
+  "status": true
+}
+```
+
+<Tip>
+  Poll `POST /status` every **5–10 seconds** after displaying the invoice to the user. Lightning payments typically settle within seconds, so this interval balances responsiveness with avoiding unnecessary load on the Buda API. Stop polling once `status` returns `true`.
+</Tip>
+
+## Invoice Expiry
+
+Every Lightning invoice has an expiry time. Once expired, the payer's wallet will refuse to send — the invoice is no longer valid and cannot be paid.
+
+This service calls `buda.lightning_network_invoices()` with `expiry_seconds: false`, which tells Buda to apply its own default expiry for newly created invoices. The actual default is determined by Buda.com and may change over time.
+
+Practical implications for your integration:
+
+- Generate invoices close to the moment of payment — don't pre-generate and cache them.
+- If a user takes too long to pay, you may need to generate a fresh invoice.
+- Expired invoices will not appear in Buda deposits with `state: 'confirmed'`, so `POST /status` will return `status: false` indefinitely for an expired, unpaid invoice.
+- Consider setting a UI timeout after which you prompt the user to request a new invoice.

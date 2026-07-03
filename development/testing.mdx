@@ -1,0 +1,131 @@
+---
+title: "Testing Buda Lightning Invoice"
+sidebarTitle: "Testing"
+description: "Run the Jest test suite, understand the mock strategy, and meet the coverage thresholds for Buda Lightning Invoice."
+---
+
+The test suite uses **Jest** as its test runner, **Supertest** for HTTP-level integration testing of the Express app, and a custom `buda-promise` mock that replaces the real Buda.com API client so tests are deterministic, require no network access, and need no real Buda credentials. Unit tests exercise each module in complete isolation — helpers, controllers, and middleware are all tested with their dependencies mocked — while integration tests boot the full Express application and assert on the HTTP responses it returns.
+
+## Running tests
+
+| Command | Description |
+|---|---|
+| `npm test` | Run the full Jest test suite once. |
+| `npm run test:coverage` | Run the suite and generate a coverage report in the `coverage/` directory. Exits with a non-zero code if any coverage threshold is not met. |
+| `npm run test:watch` | Run Jest in interactive watch mode. Re-runs affected tests on every file save. |
+
+<Tip>
+  Use `npm run test:watch` while developing. Jest's watch mode only re-runs tests related to files you have changed, giving you near-instant feedback on each save without waiting for the full suite.
+</Tip>
+
+## Test structure
+
+### Unit tests (`tests/unit/`)
+
+Unit tests cover every module in isolation by mocking all external dependencies. The suite includes:
+
+- **`tests/unit/helpers/getInvoice.test.js`** — tests that `getInvoice` instantiates the Buda client with the correct env credentials, calls `lightning_network_invoices` with the right arguments, returns the `encoded_payment_request` string, and propagates API errors.
+- **`tests/unit/helpers/getPaymentConfirmation.test.js`** — tests that `getPaymentConfirmation` calls `deposits('btc')`, returns `true` for a confirmed matching invoice, returns `false` for a pending invoice, returns `false` for an empty deposit list, and propagates API errors.
+- **`tests/unit/controllers/buda.controller.test.js`** — tests `newInvoice`, `paymentConfirmation`, and `callback` with mocked helpers. Verifies correct arguments are forwarded, success responses are structured properly, and `400` is returned on helper failure.
+- **`tests/unit/middlewares/fields-validator.test.js`** — tests `fieldsValidation` by mocking `express-validator`'s `validationResult`. Verifies `next()` is called on a clean result and a `400` with `errors.mapped()` is returned on failure.
+
+### Integration tests (`tests/integration/routes.test.js`)
+
+Integration tests use Supertest to send real HTTP requests against the Express application. The `buda-promise` module is replaced with the mock before `index.js` is required, so the app is fully booted but never touches the real Buda API.
+
+All four routes are covered:
+
+- `POST /newinvoice` — valid body returns `200` with `{ invoice, amount, msg }`; missing `amount`, missing `msg`, non-numeric `amount`, `amount < 1`, and empty `msg` each return `400`.
+- `POST /status` — paid invoice returns `200` with `status: true`; unpaid returns `200` with `status: false`; missing invoice returns `400`.
+- `GET /callback` — valid `amount` returns `200` with LNURL response; optional `comment` is used as memo; `amount` below `1000` or missing returns `400`.
+- `GET /.well-known/lnurlp/:username` — returns the LNURL-pay metadata object (no validation required; tested via the controller unit tests).
+
+### Mocks (`tests/mocks/buda-promise.mock.js`)
+
+The mock module exports `MockBuda`, a Jest constructor mock, along with the two jest function stubs it exposes — `mockLightningNetworkInvoices` and `mockDeposits` — and a constant `MOCK_INVOICE` string used as the default resolved value. Test files import these stubs so they can override resolved values or simulate rejections using `mockResolvedValueOnce` / `mockRejectedValueOnce`.
+
+## Coverage thresholds
+
+Coverage thresholds are declared in `jest.config.js` under `coverageThreshold.global`. If the measured coverage for any metric falls below its threshold, `npm run test:coverage` exits with a non-zero code and CI will fail.
+
+| Metric | Minimum |
+|---|---|
+| Branches | 60% |
+| Functions | 70% |
+| Lines | 70% |
+| Statements | 70% |
+
+<Note>
+  Coverage is collected only from `controllers/**/*.js`, `helpers/**/*.js`, `middlewares/**/*.js`, and `routes/**/*.js`. The `buda-promise/` directory is explicitly excluded because it is an external vendor wrapper — its coverage is not tracked.
+</Note>
+
+The full `jest.config.js`:
+
+```javascript
+process.env.NODE_ENV = 'test';
+
+module.exports = {
+  testEnvironment: 'node',
+  testMatch: ['**/tests/**/*.test.js'],
+  collectCoverageFrom: [
+    'controllers/**/*.js',
+    'helpers/**/*.js',
+    'middlewares/**/*.js',
+    'routes/**/*.js',
+    '!**/node_modules/**',
+    '!**/buda-promise/**'
+  ],
+  coverageThreshold: {
+    global: {
+      branches: 60,
+      functions: 70,
+      lines: 70,
+      statements: 70
+    }
+  },
+  coverageReporters: ['text', 'lcov', 'html'],
+  verbose: true
+};
+```
+
+## Mock strategy
+
+Every test file that exercises code which internally calls `require('../buda-promise/buda')` begins with:
+
+```javascript
+jest.mock('../../buda-promise/buda', () => MockBuda);
+```
+
+Jest intercepts the `require` call and substitutes `MockBuda` — a jest constructor mock — for the real client. When the production code calls `new Buda(apiKey, apiSecret)`, it actually receives a plain object whose methods are the exported jest function stubs.
+
+The mock module itself is defined once and shared across the entire suite:
+
+```javascript
+// tests/mocks/buda-promise.mock.js
+
+const MOCK_INVOICE = 'lnbc50u1p0test123mockInvoiceBOLT11encodedstring';
+
+const mockLightningNetworkInvoices = jest.fn().mockResolvedValue({
+  invoice: {
+    encoded_payment_request: MOCK_INVOICE
+  }
+});
+
+const mockDeposits = jest.fn().mockResolvedValue({
+  deposits: []
+});
+
+const MockBuda = jest.fn().mockImplementation(() => ({
+  lightning_network_invoices: mockLightningNetworkInvoices,
+  deposits: mockDeposits
+}));
+
+module.exports = {
+  MockBuda,
+  mockLightningNetworkInvoices,
+  mockDeposits,
+  MOCK_INVOICE
+};
+```
+
+Each test file imports the named stubs and can override their resolved value for a single call using `mockResolvedValueOnce` without affecting other tests. The `beforeEach` blocks call `jest.clearAllMocks()` to reset call counts and any per-test overrides between tests, keeping every test independent.

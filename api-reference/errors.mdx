@@ -1,0 +1,137 @@
+---
+title: "API Error Responses and Validation"
+sidebarTitle: "Errors"
+description: "Error response formats, HTTP status codes, validation error shapes, and common error messages from the Buda Lightning Invoice API."
+---
+
+The Buda Lightning Invoice API returns two distinct error shapes. **Validation errors** are produced by the `express-validator` middleware when a request field is missing or does not meet its rules — they arrive before any business logic runs. **Application errors** are produced when the controller or an internal Buda.com API call fails — they carry a plain error string instead of a field map. Both shapes use HTTP `400 Bad Request` and always include `"ok": false`.
+
+## Validation Errors (400)
+
+Validation errors are returned when one or more request fields fail their `express-validator` checks. The response contains an `errors` object whose keys are the failing field names.
+
+```json
+{
+  "ok": false,
+  "errors": {
+    "fieldName": {
+      "msg": "Human-readable error message"
+    }
+  }
+}
+```
+
+<Note>
+  Multiple fields can fail at once. Every failing field gets its own key inside `errors`, each with a `msg` property.
+</Note>
+
+**`amount` on `POST /newinvoice`** — triggered when `amount` is missing, non-numeric, or less than `1` satoshi:
+
+```json
+{
+  "ok": false,
+  "errors": {
+    "amount": {
+      "msg": "Ingrese un número entero mayor a 1"
+    }
+  }
+}
+```
+
+**`msg` on `POST /newinvoice`** — triggered when `msg` is absent or an empty string:
+
+```json
+{
+  "ok": false,
+  "errors": {
+    "msg": {
+      "msg": "Debe ingresar un mensaje"
+    }
+  }
+}
+```
+
+**`invoice` on `POST /status`** — triggered when `invoice` is missing or not a string:
+
+```json
+{
+  "ok": false,
+  "errors": {
+    "invoice": {
+      "msg": "Ingrese invoice"
+    }
+  }
+}
+```
+
+**`amount` on `GET /callback`** — triggered when `amount` is missing, non-numeric, or less than `1000` millisatoshis:
+
+```json
+{
+  "ok": false,
+  "errors": {
+    "amount": {
+      "msg": "Ingrese un número entero mayor a 1000 msats"
+    }
+  }
+}
+```
+
+## Application Errors (400)
+
+Application errors are returned when business logic fails or a Buda.com API call does not succeed. The response contains a single `error` string instead of a field map.
+
+```json
+{
+  "ok": false,
+  "error": "Buda error 422: {\"message\": \"..\"}"
+}
+```
+
+| Error pattern | When it occurs |
+|---------------|----------------|
+| `"Buda error {statusCode}: {body}"` | The Buda.com API responded with a non-success HTTP status. `statusCode` is the upstream HTTP code; `body` is the raw response body. |
+| `"Buda error: {message}"` | A network or runtime error occurred while communicating with Buda.com (e.g. timeout, DNS failure, connection refused). |
+
+<Warning>
+  A `400` response from this API does **not** always mean the client sent a bad request. It may also indicate a transient upstream failure from Buda.com. Inspect the `error` string to distinguish the two cases.
+</Warning>
+
+## Validation Rules Summary
+
+| Field | Endpoint | Rule | Error message |
+|-------|----------|------|---------------|
+| `amount` | `POST /newinvoice` | Required integer, minimum value `1` (satoshis) | `Ingrese un número entero mayor a 1` |
+| `msg` | `POST /newinvoice` | Required non-empty string, minimum length `1` | `Debe ingresar un mensaje` |
+| `invoice` | `POST /status` | Required non-empty string | `Ingrese invoice` |
+| `amount` | `GET /callback` | Required integer, minimum value `1000` (millisatoshis) | `Ingrese un número entero mayor a 1000 msats` |
+
+<Note>
+  `/newinvoice` and `/status` accept a JSON body (`Content-Type: application/json`). The `/callback` endpoint reads `amount` and `comment` from the URL query string — no request body is used.
+</Note>
+
+## Handling Errors in Code
+
+The example below shows how to detect and handle both error shapes in a single `fetch` call.
+
+```javascript
+const res = await fetch('https://budaln.fly.dev/newinvoice', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ amount: 1000, msg: 'Coffee' })
+});
+const data = await res.json();
+
+if (!res.ok) {
+  if (data.errors) {
+    // Validation error — one or more fields failed their rules
+    const messages = Object.values(data.errors).map(e => e.msg);
+    console.error('Validation:', messages.join(', '));
+  } else {
+    // Application error — Buda.com API failure or business logic error
+    console.error('Error:', data.error);
+  }
+}
+```
+
+The key distinction is the presence of the `errors` key (an object of field errors from `express-validator`) versus the `error` key (a plain string from the controller catch block). Checking `data.errors` first handles the validation case; the `else` branch covers all application-level failures.

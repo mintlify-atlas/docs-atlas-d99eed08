@@ -1,0 +1,82 @@
+---
+title: "Buda Lightning Invoice API Reference"
+sidebarTitle: "Overview"
+description: "REST API reference for Buda Lightning Invoice. Base URL, authentication model, content type, and an index of all available endpoints."
+---
+
+The Buda Lightning Invoice API is a REST service that communicates exclusively over HTTPS and exchanges data as JSON. It wraps the Buda.com exchange API to let clients create Bitcoin Lightning Network invoices and verify payment status — without ever handling Buda.com credentials directly. All four endpoints are publicly accessible; no API key or token is required from consumers.
+
+## Base URL
+
+```
+https://budaln.fly.dev
+```
+
+<Note>
+  During local development the base URL is `http://localhost:3001`, assuming `PORT=3001` is set in your `.env` file. If `PORT` is not defined, the server defaults to `8080`.
+</Note>
+
+## Authentication
+
+API consumers do **not** need to authenticate. All Buda.com credentials (`BUDA_API_KEY` and `BUDA_API_SECRET`) are stored as server-side environment variables and are never exposed to clients. The server signs every outbound request to Buda.com using HMAC-SHA384 internally.
+
+The only header you need to set on POST requests is `Content-Type: application/json`.
+
+<Warning>
+  Never pass Buda.com API credentials through this API or from a frontend. Keep them exclusively in server environment variables.
+</Warning>
+
+## Content Type
+
+POST endpoints read a JSON body. Always include the `Content-Type: application/json` header on those requests.
+
+GET endpoints (`/.well-known/lnurlp/:username` and `/callback`) receive their parameters via URL query string — no request body or content-type header is needed.
+
+## Endpoints
+
+<CardGroup cols={2}>
+  <Card
+    title="Create Lightning Invoice"
+    icon="bolt"
+    href="/api-reference/create-invoice"
+  >
+    `POST /newinvoice` — Generate a new BOLT11 Lightning invoice for a given amount in satoshis.
+  </Card>
+  <Card
+    title="Check Invoice Status"
+    icon="circle-check"
+    href="/api-reference/check-status"
+  >
+    `POST /status` — Verify whether a Lightning invoice has been paid and confirmed on Buda.com.
+  </Card>
+  <Card
+    title="LNURL-pay Metadata"
+    icon="at"
+    href="/api-reference/lnurlp-metadata"
+  >
+    `GET /.well-known/lnurlp/:username` — Return the LNURL-pay metadata document for a Lightning Address.
+  </Card>
+  <Card
+    title="LNURL-pay Callback"
+    icon="arrow-right"
+    href="/api-reference/callback"
+  >
+    `GET /callback` — LNURL-pay callback that converts a millisatoshi amount into a BOLT11 invoice.
+  </Card>
+</CardGroup>
+
+## HTTP Status Codes
+
+| Code | Meaning |
+|------|---------|
+| `200 OK` | Request processed successfully. The response body contains the requested data. |
+| `400 Bad Request` | Validation error or Buda.com API error. The response body contains an `errors` object or an `error` string describing the problem. |
+| `500 Internal Server Error` | Unexpected server-side error not caught by application logic. |
+
+## Rate Limits
+
+No explicit rate limiting is implemented at the API level. All requests are subject to:
+
+- **Buda.com API rate limits** — enforced upstream on every invoice creation and deposit lookup call.
+- **Fly.io infrastructure limits** — platform-level request throttling on the `budaln` application.
+- **5-second request timeout** — the internal Buda.com HTTP client enforces a hard 5 000 ms timeout per outbound request. Requests that exceed this will return a `400` application error.

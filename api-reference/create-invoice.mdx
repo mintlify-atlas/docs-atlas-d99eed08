@@ -1,0 +1,187 @@
+---
+title: "POST /newinvoice — Create a Lightning Invoice"
+sidebarTitle: "POST /newinvoice"
+description: "POST /newinvoice creates a BOLT11 Lightning invoice via Buda.com. Requires amount in satoshis and a description. Returns the encoded payment request."
+---
+
+This endpoint creates a new Bitcoin Lightning Network BOLT11 invoice by forwarding your request to Buda.com's `POST /api/v2/lightning_network_invoices`. The server authenticates with Buda.com using server-side HMAC-SHA384 credentials — no API keys are required from you. On success it returns the encoded payment request string, which can be displayed as a QR code or pasted directly into any Lightning-compatible wallet.
+
+```
+POST /newinvoice
+```
+
+## Request
+
+**Content-Type:** `application/json`
+
+<ParamField body="amount" type="integer" required>
+  Amount in satoshis. Must be an integer greater than or equal to 1. Note that
+  the `/callback` LNURL-pay endpoint uses millisatoshis instead; this endpoint
+  always expects whole satoshis.
+</ParamField>
+
+<ParamField body="msg" type="string" required>
+  Invoice description or memo that appears in the payer's wallet. Minimum
+  length: 1 character.
+</ParamField>
+
+## Response (200 OK)
+
+<ResponseField name="invoice" type="string">
+  BOLT11-encoded payment request string. Starts with `lnbc` on mainnet. Pass
+  this value to `POST /status` to poll for payment confirmation.
+</ResponseField>
+
+<ResponseField name="amount" type="integer">
+  The amount from the request, echoed back in satoshis.
+</ResponseField>
+
+<ResponseField name="msg" type="string">
+  The description from the request, echoed back.
+</ResponseField>
+
+<Note>
+  The `invoice` field is a standard BOLT11 payment request that starts with
+  `lnbc` on the Bitcoin mainnet. It is universally compatible with Lightning
+  wallets such as Phoenix, Wallet of Satoshi, Muun, Zeus, and any other
+  BOLT11-compliant application.
+</Note>
+
+## Error Responses
+
+All errors return HTTP **400 Bad Request**.
+
+**Validation error** — returned when `amount` or `msg` fail the input checks:
+
+```json
+{
+  "ok": false,
+  "errors": {
+    "amount": { "msg": "Ingrese un número entero mayor a 1" },
+    "msg": { "msg": "Debe ingresar un mensaje" }
+  }
+}
+```
+
+Only the fields that failed validation appear inside `errors`. A request with a valid `amount` but missing `msg` will only include the `msg` key.
+
+**Buda API error** — returned when Buda.com's API rejects the request (e.g. invalid credentials, service unavailable):
+
+```json
+{
+  "ok": false,
+  "error": "Buda error 422: ..."
+}
+```
+
+## Examples
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://budaln.fly.dev/newinvoice \
+  -H "Content-Type: application/json" \
+  -d '{
+    "amount": 1000,
+    "msg": "Coffee payment"
+  }'
+```
+
+```javascript JavaScript (fetch)
+async function createInvoice(amount, description) {
+  const response = await fetch("https://budaln.fly.dev/newinvoice", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      amount: amount,
+      msg: description,
+    }),
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.error || "Failed to create invoice");
+  }
+
+  // Returns the BOLT11 payment request string (e.g. "lnbc10u1p3q9h7z...")
+  return data.invoice;
+}
+
+// Usage
+const invoice = await createInvoice(1000, "Coffee payment");
+console.log("Payment request:", invoice);
+```
+
+```python Python
+import requests
+
+API_BASE = "https://budaln.fly.dev"
+
+def create_invoice(amount: int, message: str) -> str:
+    """
+    Create a Lightning invoice via Buda.com.
+
+    Args:
+        amount:  Amount in satoshis (integer >= 1).
+        message: Invoice description shown in the payer's wallet.
+
+    Returns:
+        BOLT11-encoded payment request string (starts with "lnbc").
+
+    Raises:
+        ValueError: If the server returns a validation error.
+        Exception:  If the Buda API returns an error.
+    """
+    response = requests.post(
+        f"{API_BASE}/newinvoice",
+        json={"amount": amount, "msg": message},
+    )
+
+    body = response.json()
+
+    if response.status_code != 200:
+        # Validation errors are nested; application errors are a flat string
+        if "errors" in body:
+            raise ValueError(f"Validation error: {body['errors']}")
+        raise Exception(f"API error: {body.get('error', 'Unknown error')}")
+
+    return body["invoice"]
+
+
+# Usage
+invoice = create_invoice(1000, "Coffee payment")
+print("Payment request:", invoice)
+```
+
+</CodeGroup>
+
+### Success response
+
+```json
+{
+  "invoice": "lnbc10u1p3q9h7zpp5...",
+  "amount": 1000,
+  "msg": "Coffee payment"
+}
+```
+
+### Validation error response
+
+```json
+{
+  "ok": false,
+  "errors": {
+    "amount": { "msg": "Ingrese un número entero mayor a 1" }
+  }
+}
+```
+
+<Tip>
+  After creating an invoice, poll `POST /status` with the returned `invoice`
+  string every 5–10 seconds to detect when the payer has confirmed their
+  Lightning payment. See the [Check Invoice Status](/api-reference/check-status)
+  page for a ready-made polling example.
+</Tip>

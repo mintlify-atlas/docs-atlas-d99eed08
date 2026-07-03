@@ -1,47 +1,114 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get started with Buda Lightning Invoice"
+sidebarTitle: "Quickstart"
+description: "Install and run Buda Lightning Invoice locally, create your first Lightning invoice, and verify payment in under 5 minutes."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
+By the end of this guide you will have the Buda Lightning Invoice service running on your local machine, a real BOLT11 Lightning invoice generated through your Buda.com account, and a confirmed payment status check — all in under five minutes.
 
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
-
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+<Note>
+  The production deployment lives at **`https://budaln.fly.dev`**. Use that base URL if you want to test against the hosted instance instead of running locally.
+</Note>
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+  <Step title="Clone the repository and install dependencies">
+    Clone the project from GitHub and install its npm dependencies:
 
     ```bash
-    npm install your-package
+    git clone https://github.com/nicosaporiti/buda-lightning-invoice.git
+    cd buda-lightning-invoice
+    npm install
+    ```
+
+    This installs Express, express-validator, dotenv, cors, and the rest of the runtime dependencies listed in `package.json`.
+  </Step>
+
+  <Step title="Configure your environment">
+    Create a `.env` file at the project root with your Buda.com credentials and optional server settings:
+
+    ```env
+    PORT=3001
+    BUDA_API_KEY=your_key
+    BUDA_API_SECRET=your_secret
+    DOMAIN=your-domain.com
+    ```
+
+    `PORT` and `DOMAIN` are both optional. If omitted, the server defaults to port `8080` (matching the Fly.io configuration) and derives the domain from the incoming request's `Host` header. `BUDA_API_KEY` and `BUDA_API_SECRET` are required — without them the service cannot authenticate with Buda.com.
+
+    See the [Configuration](/configuration) page for a full description of every variable.
+  </Step>
+
+  <Step title="Start the server">
+    Start in development mode with hot reload powered by `nodemon`:
+
+    ```bash
+    npm run dev
+    ```
+
+    Or start without hot reload for a production-like environment:
+
+    ```bash
+    npm start
+    ```
+
+    Either command prints the following when the server is ready:
+
+    ```bash
+    Listening at port 3001
     ```
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+
+  <Step title="Create your first invoice">
+    With the server running, send a `POST` request to `/newinvoice` with an amount in satoshis and a short memo:
 
     ```bash
-    your-cli init
+    curl -X POST http://localhost:3001/newinvoice \
+      -H "Content-Type: application/json" \
+      -d '{"amount": 1000, "msg": "Coffee payment"}'
     ```
+
+    A successful response returns the BOLT11 invoice string along with the values you submitted:
+
+    ```json
+    {
+      "invoice": "lnbc10u1p...",
+      "amount": 1000,
+      "msg": "Coffee payment"
+    }
+    ```
+
+    Copy the `invoice` value — you will need it in the next step.
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+
+  <Step title="Check payment status">
+    To verify whether the invoice has been paid, send a `POST` request to `/status` with the invoice string:
 
     ```bash
-    your-cli start
+    curl -X POST http://localhost:3001/status \
+      -H "Content-Type: application/json" \
+      -d '{"invoice": "lnbc10u1p..."}'
     ```
+
+    The response echoes the invoice and returns a boolean `status` field:
+
+    ```json
+    {
+      "invoice": "lnbc10u1p...",
+      "status": false
+    }
+    ```
+
+    <Tip>
+      `status` is `false` until the invoice is paid and the corresponding deposit reaches a `confirmed` state on Buda.com. Poll this endpoint after sending payment from a Lightning wallet to see it flip to `true`.
+    </Tip>
   </Step>
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
-
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="configuration">
+    Learn about every environment variable and how to obtain your Buda.com API credentials.
+  </Card>
+  <Card title="API Reference" icon="code" href="api-reference/overview">
+    Explore the full request and response schemas for all four endpoints.
+  </Card>
+</CardGroup>

@@ -1,0 +1,106 @@
+---
+title: "Security Considerations for Buda Lightning Invoice"
+sidebarTitle: "Security"
+description: "Security model, credential handling, CORS policy, input validation, and known limitations of Buda Lightning Invoice."
+---
+
+Buda Lightning Invoice follows a server-side credential model: the `BUDA_API_KEY` and `BUDA_API_SECRET` required to call the Buda.com API live exclusively in server environment variables and are never included in any HTTP response. The public-facing HTTP endpoints require no authentication from consumers — any client that can reach the server can create invoices and check payment status — so the attack surface is limited to malformed inputs and API abuse rather than credential leakage. All request inputs are validated by `express-validator` before they are allowed to reach any controller or business logic, so invalid payloads are rejected immediately at the route layer.
+
+## Credential security
+
+API credentials are read from environment variables at call time inside each helper:
+
+```javascript
+const apiKey    = process.env.BUDA_API_KEY;
+const apiSecret = process.env.BUDA_API_SECRET;
+const privateBuda = new Buda(apiKey, apiSecret);
+```
+
+The Buda API client (`buda-promise/buda.js`) uses these credentials to sign every outbound private request with **HMAC-SHA384**. Three custom headers are attached to authenticated calls:
+
+| Header | Purpose |
+|---|---|
+| `X-SBTC-APIKEY` | Identifies the account. |
+| `X-SBTC-NONCE` | A monotonically increasing timestamp (milliseconds). Prevents replay attacks — Buda rejects requests whose nonce is not greater than the last accepted nonce. |
+| `X-SBTC-SIGNATURE` | The HMAC-SHA384 signature of the nonce + method + path + MD5 body hash, keyed by `BUDA_API_SECRET`. |
+
+Because the signature is computed server-side and the secret never leaves the server, intercepting a request in transit does not expose the credentials and the nonce prevents replaying a captured signed request.
+
+<Note>
+  Never expose `BUDA_API_KEY` or `BUDA_API_SECRET` in a frontend application. These variables must live only in server environment variables or a secrets vault. The `.env` file is included in `.gitignore` and must never be committed to version control.
+</Note>
+
+## Input validation
+
+All user-supplied inputs are validated with `express-validator` at the route layer, before any controller or helper is invoked. The `fieldsValidation` middleware reads the result of all `check()` calls and, if any fail, immediately returns `400` with a structured error body — the controller is never reached.
+
+The validation rules for each endpoint are:
+
+| Endpoint | Field | Rules |
+|---|---|---|
+| `POST /newinvoice` | `amount` | Required, numeric, integer ≥ 1 |
+| `POST /newinvoice` | `msg` | Required, string, min length 1 |
+| `POST /status` | `invoice` | Required, non-empty string |
+| `GET /callback` | `amount` | Required, numeric, integer ≥ 1000 (millisatoshis) |
+
+A failed validation response looks like this:
+
+```json
+{
+  "ok": false,
+  "errors": {
+    "amount": {
+      "msg": "Ingrese un número entero mayor a 1",
+      "param": "amount",
+      "location": "body"
+    }
+  }
+}
+```
+
+The `errors` object is keyed by field name, making it straightforward for frontend clients to map error messages to specific form fields.
+
+## CORS configuration
+
+CORS is enabled globally for all origins using the default `cors()` middleware:
+
+```javascript
+// index.js
+app.use(cors());
+```
+
+This is intentional — the service is designed to be consumed by frontend clients from any domain (for example, a Lightning Address wallet or a custom payment form). The `cors` package, when called with no arguments, sets `Access-Control-Allow-Origin: *` and allows the standard HTTP methods.
+
+If you control all frontend clients and want to restrict access to known domains, replace the default configuration in `index.js`:
+
+```javascript
+// Restrict to a specific origin
+app.use(cors({ origin: 'https://your-frontend.com' }));
+
+// Or allow a whitelist of origins
+app.use(cors({
+  origin: ['https://your-frontend.com', 'https://wallet.example.com']
+}));
+```
+
+## Known limitations
+
+<Warning>
+  **No rate limiting.** The API applies no rate limiting of its own. Request throughput is bounded only by Buda.com's own API limits and any infrastructure-level throttling provided by your hosting platform (e.g., Fly.io). A malicious client can generate invoice creation requests at high frequency. Consider adding a middleware such as `express-rate-limit` if the service is publicly accessible.
+</Warning>
+
+<Warning>
+  **No request authentication.** Any client that can reach the server's HTTP endpoints can create invoices and query payment status. If you are exposing this service on the public internet and want to restrict access to known clients, add an API key middleware that checks a shared secret in an `Authorization` or `X-API-Key` header before the route handlers run.
+</Warning>
+
+<Warning>
+  **Hardcoded Buda API timeout.** The `buda-promise/buda.js` client uses a fixed 5000 ms timeout for all calls to the Buda.com API. If Buda is slow to respond, the request will fail with a timeout error and the controller returns `400`. There is currently no retry logic.
+</Warning>
+
+## Best practices
+
+- **Always use HTTPS in production.** When deployed to Fly.io, set `force_https = true` in `fly.toml` to ensure all traffic is redirected from HTTP to HTTPS. This protects the request body and query parameters from interception.
+- **Store secrets in a vault.** Use `fly secrets set` to store `BUDA_API_KEY`, `BUDA_API_SECRET`, and `DOMAIN` on Fly.io. Never hard-code credentials in `index.js` or any application file, and never commit a `.env` file to version control.
+- **Set `DOMAIN` correctly.** The `DOMAIN` environment variable is used to build the `callback` URL returned by `GET /.well-known/lnurlp/:username`. If this is wrong or missing, Lightning Address callbacks will point to the wrong host and invoice creation from a wallet will fail. Set it to your deployment's public hostname (e.g., `budaln.fly.dev`).
+- **Rotate API keys periodically.** Buda.com allows generating new API key/secret pairs from the account dashboard. Rotate credentials regularly and update the secrets in your deployment environment.
+- **Monitor for Buda API errors.** The controllers catch all errors thrown by helpers and return them as `400` with `error.message`. Add logging (e.g., `console.error`) or a monitoring integration to surface these failures, since a Buda error is otherwise invisible in production.

@@ -1,0 +1,246 @@
+---
+title: "Project Structure and Architecture"
+sidebarTitle: "Project Structure"
+description: "Understand how Buda Lightning Invoice is organized: file layout, request flow, and the role of each module in the Express pipeline."
+---
+
+Buda Lightning Invoice follows a standard Express layered architecture where every inbound HTTP request moves through a predictable pipeline: a **route** matches the URL and triggers input validation, a **middleware** gates invalid payloads early, a **controller** owns the HTTP response and orchestrates business logic, and **helpers** handle the single-responsibility work of talking to the Buda.com API client. Keeping these concerns in separate layers makes the code easy to test in isolation — each layer can be exercised with its dependencies mocked — and straightforward to extend when new endpoints are needed.
+
+## Directory layout
+
+```text
+buda-lightning-invoice/
+├── index.js                      # App bootstrap, CORS, JSON body parser, routes
+├── routes/
+│   └── buda.js                   # Route definitions + express-validator rules
+├── controllers/
+│   └── buda.js                   # HTTP handlers, business flow orchestration
+├── helpers/
+│   ├── getInvoice.js             # Creates Lightning invoices via Buda API
+│   └── getPaymentConfirmation.js # Verifies confirmed deposits
+├── middlewares/
+│   └── fields-validator.js       # Normalizes express-validator errors → 400
+├── buda-promise/
+│   └── buda.js                   # Buda.com API client (HMAC-SHA384 auth)
+└── tests/
+    ├── integration/              # Route-level tests with Supertest
+    ├── unit/                     # Unit tests per module
+    └── mocks/                    # buda-promise mock (no real API calls)
+```
+
+## Request pipeline
+
+The following steps trace the journey of a `POST /newinvoice` request from the network to the final JSON response.
+
+<Steps>
+  <Step title="index.js — Bootstrap">
+    Express receives the incoming request. `cors()` middleware runs first, adding the appropriate CORS headers so browser-based clients are allowed. `express.json()` parses the JSON request body. The request is then handed off to the router registered at `'/'`.
+
+    ```javascript
+    app.use(cors());
+    app.use(express.json());
+    app.use('/', require('./routes/buda'));
+    ```
+  </Step>
+
+  <Step title="routes/buda.js — Route matching and validation">
+    The router matches `POST /newinvoice` and runs the `express-validator` check chain before the controller. Two fields are validated: `amount` must be a non-empty integer ≥ 1, and `msg` must be a non-empty string of at least one character.
+
+    ```javascript
+    router.post(
+      '/newinvoice',
+      [
+        check('amount', 'Ingrese un número entero mayor a 1')
+          .notEmpty()
+          .isNumeric()
+          .isInt({ min: 1 }),
+        check('msg', 'Debe ingresar un mensaje').notEmpty().isLength({ min: 1 }),
+      ],
+      fieldsValidation,
+      newInvoice
+    );
+    ```
+  </Step>
+
+  <Step title="middlewares/fields-validator.js — Gate invalid requests">
+    `fieldsValidation` calls `validationResult(req)`. If there are any validation errors it immediately returns `400` with a structured `{ ok: false, errors: {...} }` payload and the chain stops — the controller is never reached. If validation passes, `next()` is called.
+  </Step>
+
+  <Step title="controllers/buda.js → newInvoice() — Business orchestration">
+    The `newInvoice` controller extracts `amount` and `msg` from `req.body`, delegates the actual invoice creation to `getInvoice(amount, msg)`, and either returns the BOLT11 invoice in a `200` response or catches any thrown error and returns `400`.
+
+    ```javascript
+    const newInvoice = async (req, res = response) => {
+      const { amount, msg } = req.body;
+      try {
+        const invoice = await getInvoice(amount, msg);
+        res.send({ invoice, amount, msg });
+      } catch (error) {
+        res.status(400).json({ ok: false, error: error.message });
+      }
+    };
+    ```
+  </Step>
+
+  <Step title="helpers/getInvoice.js — Invoice creation">
+    `getInvoice` reads `BUDA_API_KEY` and `BUDA_API_SECRET` from environment variables, instantiates the `Buda` API client, and calls `lightning_network_invoices(amount, 'BTC', msg, false)`. It extracts `encoded_payment_request` from the response and returns it as a plain string.
+
+    ```javascript
+    const getInvoice = (amount, msg) => {
+      const Buda = require('../buda-promise/buda');
+      const privateBuda = new Buda(
+        process.env.BUDA_API_KEY,
+        process.env.BUDA_API_SECRET
+      );
+      return privateBuda
+        .lightning_network_invoices(amount, 'BTC', msg, false)
+        .then((data) => data.invoice.encoded_payment_request);
+    };
+    ```
+  </Step>
+
+  <Step title="buda-promise/buda.js — Signed HTTP request">
+    The Buda API client signs the outbound request using HMAC-SHA384, attaches the `X-SBTC-APIKEY`, `X-SBTC-NONCE`, and `X-SBTC-SIGNATURE` headers, and dispatches the authenticated HTTP call to Buda.com. The resulting data travels back up the promise chain as the BOLT11 invoice string.
+  </Step>
+</Steps>
+
+## Key modules in detail
+
+### `routes/buda.js` — Route definitions
+
+The router file is the single source of truth for URL structure and validation rules. Every route declares its validation checks inline, then threads `fieldsValidation` before the controller. This keeps validation co-located with the route definition and out of the controller.
+
+```javascript
+router.post(
+  '/newinvoice',
+  [
+    check('amount', 'Ingrese un número entero mayor a 1')
+      .notEmpty().isNumeric().isInt({ min: 1 }),
+    check('msg', 'Debe ingresar un mensaje').notEmpty().isLength({ min: 1 }),
+  ],
+  fieldsValidation,
+  newInvoice
+);
+```
+
+### `controllers/buda.js` — HTTP handlers
+
+Controllers own the HTTP contract. They read inputs from `req`, call helpers, and write the final response. They never call the Buda API directly — all Buda interaction is delegated to helpers. This keeps controllers thin and easy to unit-test with mocked helpers.
+
+```javascript
+const paymentConfirmation = async (req, res = response) => {
+  const { invoice } = req.body;
+  try {
+    const confirmed = await getPaymentConfirmation(invoice);
+    res.send({ invoice, status: confirmed });
+  } catch (error) {
+    res.status(400).json({ ok: false, error: error.message });
+  }
+};
+```
+
+### `helpers/getInvoice.js` — Lightning invoice creation
+
+This helper has one job: given an `amount` in satoshis and a `msg`, return a BOLT11 encoded payment request string. It reads credentials from the environment at call time, so it works correctly in both production and test environments (the test environment sets env vars explicitly in `beforeEach`).
+
+```javascript
+const getInvoice = (amount, msg) => {
+  const Buda = require('../buda-promise/buda');
+  const privateBuda = new Buda(
+    process.env.BUDA_API_KEY,
+    process.env.BUDA_API_SECRET
+  );
+  return privateBuda
+    .lightning_network_invoices(amount, 'BTC', msg, false)
+    .then((data) => data.invoice.encoded_payment_request);
+};
+```
+
+### `helpers/getPaymentConfirmation.js` — Payment verification
+
+This helper fetches the full BTC deposit history from Buda and searches for a deposit whose `encoded_payment_request` matches the provided invoice string **and** whose `state` is `'confirmed'`. It returns a boolean — `true` when a confirmed match is found, `false` otherwise.
+
+```javascript
+const getPaymentConfirmation = (invoice) => {
+  const Buda = require('../buda-promise/buda');
+  const privateBuda = new Buda(
+    process.env.BUDA_API_KEY,
+    process.env.BUDA_API_SECRET
+  );
+  return privateBuda.deposits('btc').then((data) => {
+    const payments = data.deposits.find(
+      (e) =>
+        e.deposit_data.invoice.encoded_payment_request === invoice &&
+        e.state === 'confirmed'
+    );
+    return !!payments;
+  });
+};
+```
+
+### `middlewares/fields-validator.js` — Validation gate
+
+The middleware wraps `express-validator`'s `validationResult` to produce a consistent 400 error shape. When validation fails, it calls `errors.mapped()` which produces a keyed object where each key is the failing field name — this makes it easy for clients to map error messages back to specific form fields.
+
+```javascript
+const fieldsValidation = (req, res = response, next) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      ok: false,
+      errors: errors.mapped(),
+    });
+  }
+  next();
+};
+```
+
+## Adding a new endpoint
+
+Follow these steps to add a new endpoint to the service:
+
+<Steps>
+  <Step title="Define the route and validation in routes/buda.js">
+    Add a new `router.get()` or `router.post()` call. Specify all `check()` rules inline, then add `fieldsValidation` as the penultimate middleware, followed by your new controller function.
+
+    ```javascript
+    router.get(
+      '/my-new-endpoint',
+      [
+        check('myParam', 'myParam is required').notEmpty(),
+      ],
+      fieldsValidation,
+      myNewHandler
+    );
+    ```
+  </Step>
+
+  <Step title="Add the handler to controllers/buda.js">
+    Write an `async` function that reads from `req.body` or `req.query`, calls a helper, and returns the appropriate JSON response. Export the function and import it at the top of `routes/buda.js`.
+
+    ```javascript
+    const myNewHandler = async (req, res = response) => {
+      const { myParam } = req.query;
+      try {
+        const result = await myHelper(myParam);
+        res.send({ result });
+      } catch (error) {
+        res.status(400).json({ ok: false, error: error.message });
+      }
+    };
+    ```
+  </Step>
+
+  <Step title="Add a helper in helpers/ if needed">
+    If your endpoint interacts with the Buda API, create a new file in `helpers/`. Instantiate the `Buda` client with env credentials, call the appropriate API method, and return a clean value to the controller.
+  </Step>
+
+  <Step title="Write unit and integration tests">
+    - Add unit tests in `tests/unit/helpers/` and `tests/unit/controllers/` for the new helper and handler, mocking `buda-promise` using the shared `MockBuda`.
+    - Add integration test cases in `tests/integration/routes.test.js` covering at least: a valid request returning `200`, and each invalid input combination returning `400`.
+  </Step>
+</Steps>
+
+<Note>
+  Coverage thresholds are enforced — adding a new endpoint without tests may cause `npm run test:coverage` to fail if function or branch coverage drops below the minimums defined in `jest.config.js`.
+</Note>

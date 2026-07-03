@@ -1,0 +1,188 @@
+---
+title: "LNURL-pay and Lightning Address Protocol"
+sidebarTitle: "Lightning Address"
+description: "How Buda Lightning Invoice implements LNURL-pay (LUD-06, LUD-09) to enable email-style Lightning Address payments through your domain."
+---
+
+A Lightning Address is an internet identifier that looks exactly like an email address — for example, `nicolas@yourdomain.com` — but instead of routing to a mailbox, it routes to a Lightning Network payment endpoint. When a compatible wallet pays to a Lightning Address, it silently resolves the address to a BOLT11 invoice using a well-defined HTTP flow. Buda Lightning Invoice implements the two HTTP endpoints this flow requires, so once you deploy the service under your own domain, anyone can pay you using your Lightning Address without needing to know anything about LNURL or Buda internals.
+
+## What Is a Lightning Address?
+
+The Lightning Address format is `username@domain.com`. It is a human-readable alias built on top of the LNURL-pay protocol (LUD-06). When a wallet encounters a Lightning Address, it performs the following sequence automatically:
+
+<Steps>
+  <Step title="Fetch payment metadata">
+    The wallet constructs the metadata URL from the address and fetches it:
+
+    ```text
+    GET https://domain.com/.well-known/lnurlp/username
+    ```
+  </Step>
+  <Step title="Read the callback URL">
+    The wallet parses the JSON response and extracts the `callback` URL, along with the `minSendable` and `maxSendable` limits (in millisatoshis).
+  </Step>
+  <Step title="Request an invoice">
+    The wallet calls the callback URL with the desired amount in millisatoshis:
+
+    ```text
+    GET {callback}?amount={msats}
+    ```
+  </Step>
+  <Step title="Pay the invoice">
+    The wallet receives a BOLT11 invoice in the `pr` field of the response and pays it over the Lightning Network.
+  </Step>
+</Steps>
+
+<Note>
+  All Lightning Address usernames at your domain resolve to the **same Buda.com account**. The `username` segment in `/.well-known/lnurlp/:username` is only used to personalise the metadata description (`"Pago Lightning a {username}"`). Any string before the `@` will work — `alice@yourdomain.com`, `donations@yourdomain.com`, and `bob@yourdomain.com` all create invoices on the single configured Buda account.
+</Note>
+
+## The Two Endpoints
+
+### `GET /.well-known/lnurlp/:username` — Payment metadata
+
+This is the first endpoint a wallet hits. It returns static metadata describing the payment endpoint.
+
+**Example request:**
+
+```bash
+curl https://yourdomain.com/.well-known/lnurlp/nicolas
+```
+
+**Response:**
+
+```json
+{
+  "callback": "https://yourdomain.com/callback",
+  "maxSendable": 100000000,
+  "minSendable": 1000,
+  "metadata": "[[\"text/plain\",\"Pago Lightning a nicolas\"]]",
+  "tag": "payRequest",
+  "commentAllowed": 140
+}
+```
+
+Key fields:
+
+| Field | Value | Notes |
+|-------|-------|-------|
+| `callback` | `https://{DOMAIN}/callback` | Built from the `DOMAIN` env var, or falls back to the request's `Host` header |
+| `minSendable` | `1000` | Minimum sendable amount in **millisatoshis** (= 1 sat) |
+| `maxSendable` | `100000000` | Maximum sendable amount in **millisatoshis** (= 100,000 sat) |
+| `metadata` | JSON-encoded array | Contains the plain-text description for the invoice |
+| `tag` | `"payRequest"` | Required LNURL-pay discriminator |
+| `commentAllowed` | `140` | Maximum comment length in characters (LUD-09) |
+
+### `GET /callback` — Invoice generation
+
+After reading the metadata, the wallet calls this endpoint with the payment amount.
+
+**Query parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `amount` | Yes | Amount in **millisatoshis** (integer ≥ 1000) |
+| `comment` | No | Optional memo; defaults to `"Pago desde Lightning Address"` |
+
+**Example request:**
+
+```bash
+curl "https://yourdomain.com/callback?amount=5000000&comment=Gracias"
+```
+
+**Response:**
+
+```json
+{
+  "pr": "lnbc50u1p3q9h8app5...",
+  "successAction": {
+    "tag": "message",
+    "message": "Gracias por tu pago"
+  },
+  "routes": []
+}
+```
+
+The `amount` is converted from millisatoshis to satoshis internally (`amount / 1000`) before the invoice is created through Buda. The `successAction` message is displayed by the wallet after the payment settles.
+
+## Setting Up Your Lightning Address
+
+<Steps>
+  <Step title="Configure the DOMAIN environment variable">
+    Set `DOMAIN` to your public hostname when deploying. This is used to build the `callback` URL in the metadata response.
+
+    **Locally (`.env` file):**
+
+    ```bash
+    DOMAIN=yourdomain.com
+    ```
+
+    **On Fly.io:**
+
+    ```bash
+    fly secrets set DOMAIN=yourdomain.com
+    ```
+
+    If `DOMAIN` is not set, the service falls back to the `Host` header of each incoming request.
+  </Step>
+  <Step title="Deploy the service under your domain">
+    Ensure your domain's DNS and TLS are configured so that `https://yourdomain.com` reaches the running service. The `/.well-known/lnurlp/:username` route is handled automatically — no extra web server configuration is needed.
+  </Step>
+  <Step title="Choose your Lightning Address username(s)">
+    Because all usernames resolve to the same account, you can use any identifier you like — your name, a project name, or a generic word like `donations`. Share it in the format `username@yourdomain.com`.
+  </Step>
+  <Step title="Test with a compatible wallet">
+    Send a small payment from a Lightning Address-compatible wallet (e.g. Wallet of Satoshi, Phoenix, Zeus, Muun) to verify the full flow end-to-end.
+  </Step>
+</Steps>
+
+## Complete Wallet Interaction Example
+
+The following shows the exact JSON exchanged during a wallet-to-Lightning-Address payment flow.
+
+**Step 1 — Wallet fetches metadata:**
+
+```bash
+GET https://yourdomain.com/.well-known/lnurlp/nicolas
+```
+
+```json
+{
+  "callback": "https://yourdomain.com/callback",
+  "maxSendable": 100000000,
+  "minSendable": 1000,
+  "metadata": "[[\"text/plain\",\"Pago Lightning a nicolas\"]]",
+  "tag": "payRequest",
+  "commentAllowed": 140
+}
+```
+
+**Step 2 — Wallet calls callback for a 5,000-satoshi invoice (5,000,000 msats):**
+
+```bash
+GET https://yourdomain.com/callback?amount=5000000&comment=Great+work
+```
+
+```json
+{
+  "pr": "lnbc50u1p3q9h8app5xkzqlafes8y3akuqr4n...",
+  "successAction": {
+    "tag": "message",
+    "message": "Gracias por tu pago"
+  },
+  "routes": []
+}
+```
+
+The wallet pays the invoice in `pr` and shows the `successAction.message` to the user upon settlement.
+
+## Spec Compliance
+
+This service implements two LNURL specifications from the [LNURL Documents (LUDs)](https://github.com/lnurl/luds) repository:
+
+| Spec | Title | How it is implemented |
+|------|-------|-----------------------|
+| **LUD-06** | LNURL-pay | `/.well-known/lnurlp/:username` metadata endpoint + `/callback` invoice endpoint |
+| **LUD-09** | `successAction` and `commentAllowed` | `commentAllowed: 140` in metadata; `successAction` with `tag: "message"` in callback response |
+
+The Lightning Address standard itself (mapping `user@domain` to `/.well-known/lnurlp/user`) is defined in the [Lightning Address specification](https://lightningaddress.com) and builds on top of LUD-06.

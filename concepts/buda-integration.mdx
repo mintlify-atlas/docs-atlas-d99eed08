@@ -1,0 +1,153 @@
+---
+title: "How Buda.com Integration Works"
+sidebarTitle: "Buda Integration"
+description: "How Buda Lightning Invoice authenticates with Buda.com using HMAC-SHA384 signatures and which Buda API endpoints it calls internally."
+---
+
+Buda Lightning Invoice wraps the Buda.com REST API using a local client — `buda-promise/buda.js` — that handles all authentication and request signing on the server side. API consumers (your frontend or integration code) call the simple HTTP endpoints this service exposes and never need to know about Buda credentials or how to construct authenticated requests. The `BUDA_API_KEY` and `BUDA_API_SECRET` environment variables stay on the server, invisible to callers.
+
+## HMAC-SHA384 Authentication
+
+Every private Buda.com API call is signed using HMAC-SHA384. The signing algorithm is implemented in `Buda.prototype._authHeader` and `Buda.prototype._generateNonce` inside `buda-promise/buda.js`.
+
+**Nonce generation**
+
+The nonce is a timestamp-plus-counter string that guarantees uniqueness even for multiple calls within the same millisecond:
+
+```javascript
+// now = current Unix timestamp in ms
+// nonceIncr = 0–999, reset each new millisecond
+// padding = '000', '00', '0', or '' depending on nonceIncr magnitude
+nonce = now + padding + nonceIncr
+// e.g. "1704067200000" + "000" + "0" → "17040672000000000"
+```
+
+This supports up to 999 authenticated requests per millisecond without nonce collisions.
+
+**Message construction**
+
+The message to sign depends on whether the request includes a body:
+
+```text
+# Without a request body (e.g. GET requests):
+METHOD + ' ' + PATH + ' ' + NONCE
+
+# With a request body (e.g. POST requests):
+METHOD + ' ' + PATH + ' ' + BASE64(JSON(body)) + ' ' + NONCE
+```
+
+Examples:
+
+```text
+# GET deposits:
+GET /api/v2/currencies/btc/deposits 17040672000000000
+
+# POST new invoice (body base64-encoded):
+POST /api/v2/lightning_network_invoices eyJhbW91bnRfc2F0b3NoaXMiOjUwMDB9 17040672000000001
+```
+
+**Signature computation**
+
+```javascript
+signature = HMAC-SHA384(api_secret, message).digest('hex')
+```
+
+**Headers sent with every authenticated request**
+
+```text
+X-SBTC-APIKEY:     <your Buda API key>
+X-SBTC-NONCE:      <generated nonce>
+X-SBTC-SIGNATURE:  <HMAC-SHA384 hex signature>
+```
+
+<Warning>
+  Never expose `BUDA_API_KEY` or `BUDA_API_SECRET` in client-side code, public repositories, or frontend bundles. These credentials grant full access to your Buda.com account — including withdrawals. They must only exist as server-side environment variables.
+</Warning>
+
+## Buda API Calls Made by This Service
+
+Only two Buda endpoints are used in the current service implementation. Both require authentication.
+
+**1. Create a Lightning invoice — `POST /api/v2/lightning_network_invoices`**
+
+Called by `helpers/getInvoice.js` whenever `POST /newinvoice` or `GET /callback` is invoked.
+
+Request payload:
+
+```json
+{
+  "amount_satoshis": 5000,
+  "currency": "BTC",
+  "memo": "Asado contribution",
+  "expiry_seconds": false
+}
+```
+
+`expiry_seconds: false` instructs Buda to apply its default invoice expiry. The response includes an `invoice` object from which the service extracts `encoded_payment_request` — the BOLT11 string returned to the caller.
+
+**2. Fetch BTC deposits — `GET /api/v2/currencies/btc/deposits`**
+
+Called by `helpers/getPaymentConfirmation.js` whenever `POST /status` is invoked.
+
+The response contains a `deposits` array. The service scans every element looking for one where both conditions are true:
+
+```javascript
+deposit.deposit_data.invoice.encoded_payment_request === invoice
+  && deposit.state === 'confirmed'
+```
+
+If a matching confirmed deposit is found, `status: true` is returned. Otherwise `status: false`.
+
+## Error Propagation
+
+Buda API errors are caught inside `Buda.prototype._request` and re-thrown as a JavaScript `Error` with a consistent message format:
+
+```javascript
+// HTTP error (e.g. 401, 422):
+throw new Error('Buda error ' + statusCode + ': ' + JSON.stringify(responseBody));
+
+// 404 specifically:
+throw new Error('Buda error 404: Not found');
+
+// Network / timeout error:
+throw new Error('Buda error: ' + err.message);
+```
+
+These error messages bubble up through the helpers to the controllers, which catch them and return a `400` response:
+
+```json
+{
+  "ok": false,
+  "error": "Buda error 422: {\"message\":\"invalid amount\"}"
+}
+```
+
+Your integration code should check for `ok: false` in any `400` response and surface the `error` string to aid debugging.
+
+## Available Buda Client Methods
+
+`buda-promise/buda.js` exposes a full set of Buda.com API methods beyond the two used by this service. If you extend the project, these are available:
+
+| Method | Auth required | Description |
+|--------|:-------------:|-------------|
+| `ticker(market)` | No | Latest ticker data for a market |
+| `order_book(market)` | No | Current order book for a market |
+| `trades(market, timestamp)` | No | Recent trades for a market |
+| `markets()` | No | List all available markets |
+| `fees(currency, type)` | No | Deposit/withdrawal fee schedules |
+| `get_quotation(market, type, amount, limit)` | Yes | Get a price quotation |
+| `balance(currency)` | Yes | Account balance for a currency |
+| `order_pages(market, per, page, state, min_exchanged)` | Yes | Paginated order history |
+| `new_order(market, type, price_type, limit, amount)` | Yes | Place a new buy/sell order |
+| `cancel_order(order_id)` | Yes | Cancel an open order |
+| `single_order(order_id)` | Yes | Fetch a single order's status |
+| `deposits(currency, per, page, state)` | Yes | List deposits for a currency |
+| `withdrawals(currency, per, page, state)` | Yes | List withdrawals for a currency |
+| `withdrawal(currency, amount, target_address, simulate)` | Yes | Initiate a crypto withdrawal |
+| `lightning_withdrawal(amount, invoice, simulate)` | Yes | Send a Lightning payment |
+| `lightning_network_invoices(amount, currency, memo, expiry_seconds)` | Yes | Create a Lightning invoice ✦ |
+| `new_fiat_deposit(currency, amount, simulate)` | Yes | Initiate a fiat deposit |
+| `new_crypto_address(currency)` | Yes | Generate a new deposit address |
+| `get_address(currency, address_id)` | Yes | Fetch an existing deposit address |
+
+✦ This is the method actively used by the service today.

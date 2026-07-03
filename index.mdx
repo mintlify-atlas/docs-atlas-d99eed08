@@ -1,20 +1,58 @@
 ---
-title: "Introduction"
-description: "Welcome to your project"
+title: "Buda Lightning Invoice"
+sidebarTitle: "Home"
+description: "Express.js backend for creating and verifying Bitcoin Lightning Network invoices through Buda.com, with built-in LNURL-pay and Lightning Address support."
 ---
 
-Write a short description of your product here. What it does, who it's for, and what they can accomplish with it.
+Buda Lightning Invoice is a server-side API that bridges the [Buda.com](https://www.buda.com) exchange with the Bitcoin Lightning Network. It lets any frontend or application create BOLT11 invoices and verify payment confirmations without ever touching Buda credentials directly — all authentication happens securely on the server.
 
-<Tip>
-  Ready to make this your own? Start by editing this page. Update your `docs.json` file to customize your site. Then fill out the [Quickstart](/quickstart) page.
-</Tip>
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Run the service locally and make your first invoice in minutes
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference/overview">
+    Full endpoint documentation with request/response schemas
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration">
+    Environment variables and server configuration options
+  </Card>
+  <Card title="Deploy to Fly.io" icon="cloud" href="/deployment/flyio">
+    One-command deployment using the included fly.toml
+  </Card>
+</CardGroup>
 
-<Card title="Quickstart" icon="rocket" href="/quickstart">
-  This card links to the quickstart page in your project.
-</Card>
-<Card title="Components" icon="puzzle-piece" href="https://mintlify.com/docs/components">
-  Add cards, callouts, steps, tabs, and more to design and structure your pages.
-</Card>
-<Card title="Settings" icon="gear" href="https://mintlify.com/docs/organize/settings">
-  Set your site name, branding, and navigation in the `docs.json` file.
-</Card>
+## How It Works
+
+The service acts as a secure wrapper: your Buda.com API credentials live exclusively in server-side environment variables. Clients call simple unauthenticated HTTP endpoints to create invoices and poll for payment status.
+
+<Steps>
+  <Step title="Configure credentials">
+    Add your `BUDA_API_KEY` and `BUDA_API_SECRET` to a `.env` file. These never leave the server.
+  </Step>
+  <Step title="Start the server">
+    Run `npm run dev` to start on `localhost:3001` (or the port you configure).
+  </Step>
+  <Step title="Create an invoice">
+    `POST /newinvoice` with an amount in satoshis and a description. Get back a BOLT11 payment request.
+  </Step>
+  <Step title="Verify payment">
+    `POST /status` with the invoice string. The API checks Buda's confirmed deposits and returns a boolean.
+  </Step>
+</Steps>
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="BOLT11 Invoice Creation" icon="bolt">
+    Generate Lightning invoices directly from Buda.com via `POST /newinvoice` with satoshi amounts and custom memos.
+  </Card>
+  <Card title="Payment Verification" icon="circle-check">
+    Confirm payments by checking Buda deposit history. Returns `true` only for `confirmed` deposits.
+  </Card>
+  <Card title="Lightning Address" icon="at">
+    Full LNURL-pay protocol support (LUD-06, LUD-09) — use your domain as an email-style Lightning Address.
+  </Card>
+  <Card title="Zero Client Auth" icon="shield">
+    All Buda API calls are HMAC-SHA384 signed server-side. No credentials are exposed to API consumers.
+  </Card>
+</CardGroup>

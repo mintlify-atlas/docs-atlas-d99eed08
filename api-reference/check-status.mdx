@@ -1,0 +1,199 @@
+---
+title: "POST /status — Check Lightning Invoice Payment"
+sidebarTitle: "POST /status"
+description: "POST /status checks whether a Lightning invoice has been paid and confirmed. Returns a boolean status by querying Buda.com's deposit history."
+---
+
+This endpoint verifies whether a Lightning invoice has been paid by querying Buda.com's BTC deposit history. It searches all confirmed deposits for one whose `deposit_data.invoice.encoded_payment_request` matches the invoice string you provide. Because the check happens server-side against the authenticated Buda.com account, no API credentials are needed from you — only the BOLT11 payment request returned by `POST /newinvoice`.
+
+```
+POST /status
+```
+
+## Request
+
+**Content-Type:** `application/json`
+
+<ParamField body="invoice" type="string" required>
+  The BOLT11 payment request string to check. This is the exact value returned
+  in the `invoice` field by `POST /newinvoice`. The string begins with `lnbc`
+  on mainnet.
+</ParamField>
+
+## Response (200 OK)
+
+<ResponseField name="invoice" type="string">
+  The invoice from the request, echoed back unchanged.
+</ResponseField>
+
+<ResponseField name="status" type="boolean">
+  `true` if the invoice has been paid **and** the corresponding deposit is in
+  the `confirmed` state in Buda. `false` in all other cases — unpaid, pending,
+  expired, or not found.
+</ResponseField>
+
+<Warning>
+  `status` is a **boolean**, not a string. Always compare it with `=== true`
+  (JavaScript) or `is True` (Python). Checking `=== 'confirmed'` or
+  `=== 'true'` will always evaluate to `false` and silently break your payment
+  flow.
+</Warning>
+
+## Status Logic
+
+The server executes the following steps to determine payment status:
+
+1. Calls Buda.com's authenticated endpoint `GET /api/v2/currencies/btc/deposits` to retrieve the full deposit history for the account.
+2. Searches the resulting list for a deposit where **both** conditions hold:
+   - `deposit_data.invoice.encoded_payment_request === invoice` (exact string match)
+   - `state === 'confirmed'`
+3. If a matching confirmed deposit is found, returns `{ status: true }`. Otherwise returns `{ status: false }`.
+
+A deposit that exists but has `state` equal to `"pending"` or any other non-confirmed value will yield `false` — the payment has arrived on-chain/off-chain but has not yet been fully settled by Buda.
+
+## Error Responses
+
+All errors return HTTP **400 Bad Request**.
+
+**Validation error** — returned when `invoice` is missing or not a string:
+
+```json
+{
+  "ok": false,
+  "errors": {
+    "invoice": { "msg": "Ingrese invoice" }
+  }
+}
+```
+
+**Buda API error** — returned when Buda.com's deposit endpoint is unreachable or returns an error:
+
+```json
+{
+  "ok": false,
+  "error": "Buda error 401: ..."
+}
+```
+
+## Examples
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://budaln.fly.dev/status \
+  -H "Content-Type: application/json" \
+  -d '{
+    "invoice": "lnbc10u1p3q9h7zpp5..."
+  }'
+```
+
+```javascript JavaScript — polling
+/**
+ * Polls POST /status every `intervalMs` milliseconds until
+ * the invoice is confirmed, then resolves with true.
+ *
+ * @param {string} invoice   - BOLT11 payment request from POST /newinvoice
+ * @param {number} intervalMs - Polling interval in ms (default: 5000)
+ * @returns {Promise<boolean>}
+ */
+async function pollForPayment(invoice, intervalMs = 5000) {
+  while (true) {
+    const response = await fetch("https://budaln.fly.dev/status", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ invoice }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || "Failed to check payment status");
+    }
+
+    // status is a boolean — check strictly
+    if (data.status === true) {
+      console.log("Payment confirmed!");
+      return true;
+    }
+
+    console.log("Payment pending, retrying in", intervalMs, "ms...");
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
+
+// Usage: create an invoice then wait for payment
+const invoice = await createInvoice(1000, "Coffee payment");
+await pollForPayment(invoice, 5000);
+```
+
+```python Python
+import requests
+import time
+
+API_BASE = "https://budaln.fly.dev"
+
+def check_payment_status(invoice: str) -> bool:
+    """
+    Check whether a Lightning invoice has been paid and confirmed.
+
+    Args:
+        invoice: BOLT11 payment request string from POST /newinvoice.
+
+    Returns:
+        True if confirmed, False if unpaid/pending/not found.
+
+    Raises:
+        ValueError: If the server returns a validation error.
+        Exception:  If the Buda API returns an error.
+    """
+    response = requests.post(
+        f"{API_BASE}/status",
+        json={"invoice": invoice},
+    )
+
+    body = response.json()
+
+    if response.status_code != 200:
+        if "errors" in body:
+            raise ValueError(f"Validation error: {body['errors']}")
+        raise Exception(f"API error: {body.get('error', 'Unknown error')}")
+
+    # status is a boolean — use `is True` for strict checking
+    return body["status"] is True
+
+
+def wait_for_payment(invoice: str, interval_seconds: int = 5) -> None:
+    """Poll until the invoice is confirmed."""
+    while not check_payment_status(invoice):
+        print(f"Payment pending, retrying in {interval_seconds}s...")
+        time.sleep(interval_seconds)
+    print("Payment confirmed!")
+
+
+# Usage
+wait_for_payment("lnbc10u1p3q9h7zpp5...", interval_seconds=5)
+```
+
+</CodeGroup>
+
+### Paid response
+
+```json
+{ "invoice": "lnbc10u1p3q9h7zpp5...", "status": true }
+```
+
+### Unpaid / pending response
+
+```json
+{ "invoice": "lnbc10u1p3q9h7zpp5...", "status": false }
+```
+
+<Tip>
+  Use a polling interval of **5–10 seconds** to keep your integration
+  responsive without hammering the Buda API. Intervals shorter than 5 seconds
+  offer no practical benefit because Lightning settlements typically complete
+  within a few seconds, and the Buda deposit list only refreshes on a similar
+  cadence.
+</Tip>
